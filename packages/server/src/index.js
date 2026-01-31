@@ -1,0 +1,128 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+
+import { getUserDb, getMetaDb } from './db/connections.js';
+import tablesRoutes from './routes/tables.js';
+import queryRoutes from './routes/query.js';
+import schemaRoutes from './routes/schema.js';
+import timelineRoutes from './routes/timeline.js';
+import migrationsRoutes from './routes/migrations.js';
+import snapshotsRoutes from './routes/snapshots.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const PROJECT_NAME = process.env.PROJECT_NAME;
+const PROJECT_PATH = process.env.PROJECT_PATH;
+const PORT = parseInt(process.env.PORT || '3000');
+
+if (!PROJECT_NAME || !PROJECT_PATH) {
+  console.error('Missing required environment variables');
+  process.exit(1);
+}
+
+const fastify = Fastify({
+  logger: {
+    level: 'info'
+  }
+});
+
+// CORS
+await fastify.register(cors, {
+  origin: true
+});
+
+// Store project info in fastify instance
+fastify.decorate('projectName', PROJECT_NAME);
+fastify.decorate('projectPath', PROJECT_PATH);
+fastify.decorate('getUserDb', () => getUserDb(PROJECT_PATH));
+fastify.decorate('getMetaDb', () => getMetaDb(PROJECT_PATH));
+
+// API Routes
+fastify.register(tablesRoutes, { prefix: '/api/tables' });
+fastify.register(queryRoutes, { prefix: '/api/query' });
+fastify.register(schemaRoutes, { prefix: '/api/schema' });
+fastify.register(timelineRoutes, { prefix: '/api/timeline' });
+fastify.register(migrationsRoutes, { prefix: '/api/migrations' });
+fastify.register(snapshotsRoutes, { prefix: '/api/snapshots' });
+
+// Project info endpoint
+fastify.get('/api/project', async (request, reply) => {
+  const configPath = join(PROJECT_PATH, 'config.json');
+  const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+  
+  return {
+    name: PROJECT_NAME,
+    path: PROJECT_PATH,
+    port: PORT,
+    ...config
+  };
+});
+
+// Serve Studio static files
+const studioPath = join(__dirname, '../../studio/out');
+
+console.log('Looking for Studio at:', studioPath);
+console.log('Studio exists:', existsSync(studioPath));
+
+if (!existsSync(studioPath)) {
+  console.error('\n❌ ERROR: Studio build not found!');
+  console.error('Please run: cd packages/studio && npm run build\n');
+  process.exit(1);
+}
+
+await fastify.register(fastifyStatic, {
+  root: studioPath,
+  prefix: '/',
+  decorateReply: false
+});
+
+// Fallback to index.html for client-side routing
+fastify.setNotFoundHandler((request, reply) => {
+  if (request.url.startsWith('/api')) {
+    reply.code(404).send({ error: 'API endpoint not found' });
+  } else {
+    reply.sendFile('index.html');
+  }
+});
+
+// Graceful shutdown
+const closeGracefully = async (signal) => {
+  console.log(`\nReceived ${signal}, closing gracefully...`);
+  
+  try {
+    // Close database connections
+    const userDb = getUserDb(PROJECT_PATH);
+    const metaDb = getMetaDb(PROJECT_PATH);
+    userDb.close();
+    metaDb.close();
+    
+    // Remove server info file
+    const serverInfoPath = join(PROJECT_PATH, '.studio', 'server.json');
+    if (existsSync(serverInfoPath)) {
+      writeFileSync(serverInfoPath, '');
+    }
+  } catch (e) {
+    console.error('Error during shutdown:', e);
+  }
+  
+  await fastify.close();
+  process.exit(0);
+};
+
+process.on('SIGTERM', closeGracefully);
+process.on('SIGINT', closeGracefully);
+
+// Start server
+try {
+  await fastify.listen({ port: PORT, host: '0.0.0.0' });
+  console.log(`\n✓ Server started for project "${PROJECT_NAME}"`);
+  console.log(`  URL: http://localhost:${PORT}`);
+  console.log(`  Path: ${PROJECT_PATH}\n`);
+} catch (err) {
+  fastify.log.error(err);
+  process.exit(1);
+}

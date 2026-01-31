@@ -1,0 +1,47 @@
+import { Command } from 'commander';
+import chalk from 'chalk';
+import { newCommand } from './commands/new.js';
+import { startCommand } from './commands/start.js';
+import { stopCommand } from './commands/stop.js';
+import { listCommand } from './commands/list.js';
+import { deleteCommand } from './commands/delete.js';
+import { openCommand } from './commands/open.js';
+
+const program = new Command();
+
+program
+  .name('localdb')
+  .description('Local SQLite database platform with Studio UI')
+  .version('1.0.0');
+
+program
+  .command('new <name>')
+  .description('Create a new database project')
+  .action(newCommand);
+
+program
+  .command('start <name>')
+  .description('Start the database server and open Studio')
+  .action(startCommand);
+
+program
+  .command('stop <name>')
+  .description('Stop the database server')
+  .action(stopCommand);
+
+program
+  .command('open <name>')
+  .description('Open Studio in browser (if server is running)')
+  .action(openCommand);
+
+program
+  .command('list')
+  .description('List all database projects')
+  .action(listCommand);
+
+program
+  .command('delete <name>')
+  .description('Delete a database project')
+  .action(deleteCommand);
+
+program.parse();

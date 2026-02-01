@@ -1,8 +1,9 @@
 'use client'
 
-import { Home, Table2, Code, Clock, Camera, Settings, Database } from 'lucide-react'
+import { Home, Code, Database, Camera, Clock, Settings, Menu } from 'lucide-react'
+import { useState } from 'react'
 
-type Page = 'home' | 'tables' | 'sql' | 'timeline' | 'snapshots'
+type Page = 'home' | 'sql' | 'database' | 'snapshots' | 'timeline' | 'settings'
 
 interface SidebarProps {
   currentPage: Page
@@ -10,25 +11,35 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+  const [collapsed, setCollapsed] = useState(false)
+
   const menuItems = [
-    { id: 'home' as Page, icon: Home, label: 'Home' },
-    { id: 'tables' as Page, icon: Table2, label: 'Tables' },
+    { id: 'home' as Page, icon: Home, label: 'Dashboard' },
     { id: 'sql' as Page, icon: Code, label: 'SQL Editor' },
-    { id: 'timeline' as Page, icon: Clock, label: 'Timeline' },
+    { id: 'database' as Page, icon: Database, label: 'Database' },
     { id: 'snapshots' as Page, icon: Camera, label: 'Snapshots' },
+    { id: 'timeline' as Page, icon: Clock, label: 'Timeline' },
+    { id: 'settings' as Page, icon: Settings, label: 'Settings' },
   ]
 
   return (
-    <div className="w-64 bg-studio-sidebar border-r border-studio-border flex flex-col">
-      <div className="p-4 border-b border-studio-border">
-        <div className="flex items-center gap-2">
-          <Database className="w-6 h-6 text-studio-accent" />
-          <span className="font-semibold text-lg">LocalDB Studio</span>
-        </div>
+    <div className={`${collapsed ? 'w-16' : 'w-56'} bg-app-sidebar border-r border-app-border flex flex-col transition-all duration-200`}>
+      {/* Header */}
+      <div className="h-12 border-b border-app-border flex items-center justify-between px-4">
+        {!collapsed && (
+          <span className="font-semibold text-base">LocalDB</span>
+        )}
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
       </div>
 
-      <nav className="flex-1 p-3">
-        <div className="space-y-1">
+      {/* Navigation */}
+      <nav className="flex-1 p-2">
+        <div className="space-y-0.5">
           {menuItems.map((item) => {
             const Icon = item.icon
             const isActive = currentPage === item.id
@@ -38,28 +49,34 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
                 key={item.id}
                 onClick={() => onNavigate(item.id)}
                 className={`
-                  w-full flex items-center gap-3 px-3 py-2.5 rounded-lg
+                  w-full flex items-center gap-3 px-3 py-2.5 rounded
                   transition-colors duration-150
                   ${isActive 
-                    ? 'bg-studio-active text-studio-accent' 
-                    : 'text-studio-text-dim hover:bg-studio-hover hover:text-studio-text'
+                    ? 'bg-app-sidebar-active text-app-text' 
+                    : 'text-app-text-dim hover:bg-app-sidebar-hover hover:text-app-text'
                   }
                 `}
+                title={collapsed ? item.label : undefined}
               >
-                <Icon className="w-5 h-5" />
-                <span className="font-medium">{item.label}</span>
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                {!collapsed && (
+                  <span className="font-medium text-sm">{item.label}</span>
+                )}
               </button>
             )
           })}
         </div>
       </nav>
 
-      <div className="p-3 border-t border-studio-border">
-        <div className="text-xs text-studio-text-dim">
-          <div>LocalDB v1.0.0</div>
-          <div className="mt-1">SQLite 3.44.0</div>
+      {/* Footer */}
+      {!collapsed && (
+        <div className="p-3 border-t border-app-border">
+          <div className="text-xs text-app-text-dim space-y-0.5">
+            <div>LocalDB v1.0.0</div>
+            <div>SQLite 3.44.0</div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

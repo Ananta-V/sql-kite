@@ -10,7 +10,7 @@ import TimelinePage from '@/components/TimelinePage'
 import SnapshotsPage from '@/components/SnapshotsPage'
 import { getProjectInfo } from '@/lib/api'
 
-type Page = 'home' | 'tables' | 'sql' | 'timeline' | 'snapshots'
+type Page = 'home' | 'sql' | 'database' | 'snapshots' | 'timeline' | 'settings'
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('home')
@@ -29,19 +29,33 @@ export default function App() {
     }
   }
 
+  // Determine which features to show in top bar
+  const topBarProps = {
+    projectInfo,
+    showCompare: currentPage === 'sql',
+    showBranch: currentPage === 'sql',
+    showAI: currentPage === 'sql',
+  }
+
   return (
-    <div className="flex h-screen bg-studio-bg text-studio-text">
+    <div className="flex h-screen bg-app-bg text-app-text">
       <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
       
       <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar projectInfo={projectInfo} />
+        <TopBar {...topBarProps} />
         
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-hidden">
           {currentPage === 'home' && <HomePage projectInfo={projectInfo} />}
-          {currentPage === 'tables' && <TablesPage />}
           {currentPage === 'sql' && <SQLEditorPage />}
+          {currentPage === 'database' && <TablesPage />}
           {currentPage === 'timeline' && <TimelinePage />}
           {currentPage === 'snapshots' && <SnapshotsPage />}
+          {currentPage === 'settings' && (
+            <div className="p-8">
+              <h1 className="text-2xl font-bold">Settings</h1>
+              <p className="text-app-text-dim mt-2">Coming soon...</p>
+            </div>
+          )}
         </main>
       </div>
     </div>

@@ -1,19 +1,126 @@
 'use client'
 
-import { useState } from 'react'
-import { Play, FileCode, Star, Lock } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Play, FileCode } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import InnerSidebar from './InnerSidebar'
-import { executeQuery } from '@/lib/api'
+import { executeQuery, getTables, getTableInfo } from '@/lib/api'
+import { 
+  SQLCompletionProvider, 
+  SQLSignatureHelpProvider, 
+  SQLHoverProvider 
+} from '@/lib/sql-autocomplete'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
 export default function SQLEditorPage() {
-  const [sql, setSql] = useState('-- Write your SQL query here\nSELECT * FROM sqlite_master;')
+  const [sql, setSql] = useState('-- Write your SQL query here\n\n-- Press Ctrl+Space for autocomplete\n')
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'result' | 'errors' | 'explain' | 'info'>('result')
+  
+  const completionProviderRef = useRef<SQLCompletionProvider | null>(null)
+  const hoverProviderRef = useRef<SQLHoverProvider | null>(null)
+  const editorRef = useRef<any>(null)
+  const monacoRef = useRef<any>(null)
+
+  // Load table schema for autocomplete
+  useEffect(() => {
+    loadSchemaForAutocomplete()
+  }, [])
+
+  async function loadSchemaForAutocomplete() {
+    try {
+      const tables = await getTables()
+      
+      // Load detailed schema for each table
+      const tableSchemas = await Promise.all(
+        tables.map(async (table: any) => {
+          const info = await getTableInfo(table.name)
+          return {
+            name: table.name,
+            columns: info.columns.map((col: any) => ({
+              name: col.name,
+              type: col.type
+            }))
+          }
+        })
+      )
+
+      // Update providers with schema
+      if (completionProviderRef.current) {
+        completionProviderRef.current.updateTables(tableSchemas)
+      }
+      if (hoverProviderRef.current) {
+        hoverProviderRef.current.updateTables(tableSchemas)
+      }
+    } catch (error) {
+      console.error('Failed to load schema for autocomplete:', error)
+    }
+  }
+
+  function handleEditorDidMount(editor: any, monaco: any) {
+    editorRef.current = editor
+    monacoRef.current = monaco
+
+    // Initialize providers
+    completionProviderRef.current = new SQLCompletionProvider()
+    hoverProviderRef.current = new SQLHoverProvider()
+
+    // Register completion provider
+    monaco.languages.registerCompletionItemProvider('sql', completionProviderRef.current)
+    
+    // Register signature help provider
+    monaco.languages.registerSignatureHelpProvider('sql', new SQLSignatureHelpProvider())
+    
+    // Register hover provider
+    monaco.languages.registerHoverProvider('sql', hoverProviderRef.current)
+
+    // Custom key bindings
+    editor.addAction({
+      id: 'run-query',
+      label: 'Run Query',
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter
+      ],
+      run: () => {
+        handleExecute()
+      }
+    })
+
+    editor.addAction({
+      id: 'run-selected',
+      label: 'Run Selected Query',
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter
+      ],
+      run: () => {
+        const selection = editor.getSelection()
+        const selectedText = editor.getModel().getValueInRange(selection)
+        if (selectedText.trim()) {
+          handleExecute(selectedText)
+        } else {
+          handleExecute()
+        }
+      }
+    })
+
+    // Format SQL action
+    editor.addAction({
+      id: 'format-sql',
+      label: 'Format SQL',
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF
+      ],
+      run: () => {
+        editor.getAction('editor.action.formatDocument').run()
+      }
+    })
+
+    // Reload schema
+    loadSchemaForAutocomplete()
+  }
 
   // Inner sidebar data
   const sidebarSections = [
@@ -37,8 +144,9 @@ export default function SQLEditorPage() {
     }
   ]
 
-  async function handleExecute() {
-    if (!sql.trim()) return
+  async function handleExecute(customSql?: string) {
+    const queryToRun = customSql || sql
+    if (!queryToRun.trim()) return
 
     setLoading(true)
     setError(null)
@@ -46,8 +154,13 @@ export default function SQLEditorPage() {
     setActiveTab('result')
 
     try {
-      const data = await executeQuery(sql)
+      const data = await executeQuery(queryToRun)
       setResult(data)
+      
+      // Reload schema if it was a DDL statement
+      if (/CREATE|ALTER|DROP/i.test(queryToRun)) {
+        loadSchemaForAutocomplete()
+      }
     } catch (err: any) {
       setError(err.message)
       setActiveTab('errors')
@@ -72,6 +185,7 @@ export default function SQLEditorPage() {
               theme="vs-dark"
               value={sql}
               onChange={(value) => setSql(value || '')}
+              onMount={handleEditorDidMount}
               options={{
                 minimap: { enabled: false },
                 fontSize: 13,
@@ -81,6 +195,28 @@ export default function SQLEditorPage() {
                 tabSize: 2,
                 padding: { top: 16, bottom: 16 },
                 fontFamily: 'Monaco, Menlo, "Courier New", monospace',
+                suggestOnTriggerCharacters: true,
+                quickSuggestions: {
+                  other: true,
+                  comments: false,
+                  strings: false
+                },
+                parameterHints: {
+                  enabled: true
+                },
+                suggest: {
+                  showKeywords: true,
+                  showSnippets: true,
+                  showFunctions: true,
+                  snippetsPreventQuickSuggestions: false
+                },
+                formatOnPaste: true,
+                formatOnType: true,
+                autoClosingBrackets: 'always',
+                autoClosingQuotes: 'always',
+                bracketPairColorization: {
+                  enabled: true
+                }
               }}
             />
           </div>
@@ -109,6 +245,9 @@ export default function SQLEditorPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              <div className="text-xs text-app-text-dim mr-2">
+                ⌘↵ Run | ⌘⇧↵ Run Selected | ⌘⇧F Format
+              </div>
               <button className="px-3 py-1.5 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded transition-colors">
                 Export
               </button>
@@ -119,7 +258,7 @@ export default function SQLEditorPage() {
                 Run migration
               </button>
               <button
-                onClick={handleExecute}
+                onClick={() => handleExecute()}
                 disabled={loading}
                 className="px-4 py-1.5 text-xs bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors font-medium"
               >
@@ -192,7 +331,7 @@ export default function SQLEditorPage() {
                   </div>
                 ) : (
                   <div className="text-app-text-dim text-center py-8 text-sm">
-                    Click "Run selected" to execute your query
+                    Click "Run selected" or press <kbd className="px-1.5 py-0.5 bg-app-sidebar-active rounded text-xs">⌘↵</kbd> to execute
                   </div>
                 )}
               </div>
@@ -210,14 +349,20 @@ export default function SQLEditorPage() {
 
             {activeTab === 'explain' && (
               <div className="text-app-text-dim text-sm">
-                Run EXPLAIN to see query plan
+                Run EXPLAIN QUERY PLAN to see query execution plan
               </div>
             )}
 
             {activeTab === 'info' && (
               <div className="text-xs text-app-text-dim space-y-2">
-                <div>Editor ready</div>
-                <div>SQLite 3.44.0</div>
+                <div>✓ SQL autocomplete enabled</div>
+                <div>✓ Press Ctrl+Space for suggestions</div>
+                <div>✓ Hover over keywords for documentation</div>
+                <div>✓ Schema-aware column suggestions</div>
+                <div className="pt-2 border-t border-app-panel-border mt-2">
+                  <div>SQLite 3.44.0</div>
+                  <div>Monaco Editor</div>
+                </div>
               </div>
             )}
           </div>

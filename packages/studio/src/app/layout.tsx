@@ -2,7 +2,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'LocalDB Studio',
+  title: 'Sql Kite',
   description: 'Local SQLite database management platform',
 }
 

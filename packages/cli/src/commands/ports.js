@@ -18,6 +18,7 @@ export async function portsCommand(options = {}) {
     console.log(chalk.dim('  All projects are stopped\n'));
     return;
   }
+  //hi
 
   console.log(chalk.cyan(`  Total allocations: ${status.total_allocations}\n`));
 

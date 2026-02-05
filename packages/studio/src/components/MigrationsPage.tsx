@@ -11,7 +11,9 @@ interface Migration {
   branch?: string
   risk?: 'LOW' | 'MED' | 'HIGH'
   created_at?: string
+  applied_at?: string
   checksum?: string
+  author?: string
   error?: string
 }
 
@@ -326,9 +328,20 @@ function MigrationRow({
           <div>
             <h4 className="text-xs font-semibold text-app-text-dim mb-2">METADATA</h4>
             <div className="text-xs text-app-text-dim space-y-1">
-              <div>Created at: {migration.created_at || 'Unknown'}</div>
-              <div>Checksum: {migration.checksum ? `sha256:${migration.checksum.substring(0, 8)}...` : 'N/A'}</div>
-              <div>Author: local</div>
+              <div>
+                Created: {migration.created_at ? new Date(migration.created_at).toLocaleString() : 'Unknown'}
+              </div>
+              {migration.applied_at && (
+                <div>
+                  Applied: {new Date(migration.applied_at).toLocaleString()}
+                </div>
+              )}
+              <div>
+                Checksum: {migration.checksum ? `sha256:${migration.checksum.substring(0, 12)}...` : 'N/A'}
+              </div>
+              <div>
+                Author: {migration.author || 'LocalDB'}
+              </div>
             </div>
           </div>
 

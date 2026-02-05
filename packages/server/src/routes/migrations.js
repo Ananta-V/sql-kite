@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { join } from 'path';
+import  crypto from 'crypto';
 
 export default async function migrationsRoutes(fastify, options) {
   // List all migrations
@@ -17,18 +18,27 @@ export default async function migrationsRoutes(fastify, options) {
       const files = readdirSync(migrationsPath).filter(f => f.endsWith('.sql')).sort();
 
       const applied = metaDb.prepare(`
-        SELECT filename FROM migrations WHERE branch = ? ORDER BY id
+        SELECT filename, applied_at FROM migrations WHERE branch = ? ORDER BY id
       `).all(currentBranch);
 
-      const appliedSet = new Set(applied.map(m => m.filename));
+      const appliedMap = new Map(applied.map(m => [m.filename, m.applied_at]));
 
       return files.map(filename => {
-        const content = readFileSync(join(migrationsPath, filename), 'utf-8');
+        const filePath = join(migrationsPath, filename);
+        const content = readFileSync(filePath, 'utf-8');
+        const stats = statSync(filePath);
+        const checksum = crypto.createHash('sha256').update(content).digest('hex');
+        const appliedAt = appliedMap.get(filename);
+
         return {
           filename,
-          applied: appliedSet.has(filename),
+          applied: appliedMap.has(filename),
           content,
-          branch: currentBranch
+          branch: currentBranch,
+          created_at: stats.birthtime.toISOString(),
+          applied_at: appliedAt || null,
+          checksum,
+          author: 'LocalDB'
         };
       });
     } catch (error) {

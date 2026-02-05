@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Sidebar from '@/components/Sidebar'
 import TopBar from '@/components/TopBar'
 import HomePage from '@/components/HomePage'
-import TablesPage from '@/components/TablesPage'
+import DatabasePage from '@/components/DatabasePage'
 import SQLEditorPage from '@/components/SQLEditorPage'
 import TimelinePage from '@/components/TimelinePage'
 import SnapshotsPage from '@/components/SnapshotsPage'
@@ -60,7 +60,7 @@ function AppContent() {
         <main className="flex-1 overflow-hidden">
           {currentPage === 'home' && <HomePage projectInfo={projectInfo} />}
           {currentPage === 'sql' && <SQLEditorPage />}
-          {currentPage === 'database' && <TablesPage />}
+          {currentPage === 'database' && <DatabasePage />}
           {currentPage === 'migrations' && <MigrationsPage />}
           {currentPage === 'timeline' && <TimelinePage />}
           {currentPage === 'snapshots' && <SnapshotsPage />}

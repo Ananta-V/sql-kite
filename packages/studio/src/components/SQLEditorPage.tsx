@@ -488,6 +488,25 @@ export default function SQLEditorPage() {
       <div className="flex-1 flex flex-col">
         {/* Editor */}
         <div className="flex-1 flex flex-col border-b border-app-border">
+          {/* Editor Hint Bar */}
+          <div className="px-4 py-1.5 bg-app-sidebar/30 border-b border-app-border/50 flex items-center gap-4 text-xs text-app-text-dim">
+            <div className="flex items-center gap-1.5">
+              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
+              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
+              <span>Run all</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
+              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⇧</kbd>
+              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
+              <span>Run selected</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
+              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">Space</kbd>
+              <span>Autocomplete</span>
+            </div>
+          </div>
           <div className="flex-1 bg-[#0f0f0f]">
             <MonacoEditor
               height="100%"
@@ -533,16 +552,16 @@ export default function SQLEditorPage() {
         </div>
 
         {/* Results Panel */}
-        <div className="h-80 flex flex-col bg-app-panel border-t border-app-panel-border">
+        <div className="h-96 flex flex-col bg-app-panel border-t border-app-panel-border">
           {/* Tabs + Actions */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-app-panel-border">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-app-panel-border bg-app-sidebar/30 flex-shrink-0">
             <div className="flex gap-4">
               {(['result', 'errors', 'explain', 'info'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => updateActiveTab(tab)}
                   className={`
-                    px-2 py-1 text-sm capitalize transition-colors
+                    px-2 py-1 text-sm capitalize transition-colors font-medium
                     ${editorState.activeTab === tab
                       ? 'text-app-text border-b-2 border-app-accent'
                       : 'text-app-text-dim hover:text-app-text'
@@ -554,7 +573,7 @@ export default function SQLEditorPage() {
               ))}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <div className="text-xs text-app-text-dim mr-2">
                 ⌘↵ Run | ⌘⇧↵ Run Selected | ⌘⇧F Format
               </div>

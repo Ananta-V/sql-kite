@@ -1,22 +1,51 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Clock, Code, Database, Camera, AlertCircle } from 'lucide-react'
-import { getTimeline } from '@/lib/api'
-import { formatDistanceToNow } from 'date-fns'
+import { Clock, Code, Database, Camera, AlertCircle, GitBranch, Loader, ChevronDown, ChevronRight } from 'lucide-react'
+import { getTimeline, getProjectInfo } from '@/lib/api'
+import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns'
+
+type FilterType = 'all' | 'migrations' | 'sql' | 'snapshots' | 'branches'
+
+interface TimelineEvent {
+  id: number
+  type: string
+  branch: string
+  data: any
+  createdAt: string
+}
 
 export default function TimelinePage() {
-  const [events, setEvents] = useState<any[]>([])
+  const [events, setEvents] = useState<TimelineEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [currentBranch, setCurrentBranch] = useState('main')
+  const [filter, setFilter] = useState<FilterType>('all')
+  const [expandedEvent, setExpandedEvent] = useState<number | null>(null)
+  const [total, setTotal] = useState(0)
+
+  useEffect(() => {
+    loadProjectInfo()
+  }, [])
 
   useEffect(() => {
     loadTimeline()
-  }, [])
+  }, [filter])
+
+  async function loadProjectInfo() {
+    try {
+      const info = await getProjectInfo()
+      setCurrentBranch(info.currentBranch || 'main')
+    } catch (error) {
+      console.error('Failed to load project info:', error)
+    }
+  }
 
   async function loadTimeline() {
     try {
-      const data = await getTimeline(100, 0)
-      setEvents(data.events)
+      setLoading(true)
+      const data = await getTimeline(100, 0, false)
+      setEvents(data.events || [])
+      setTotal(data.total || 0)
     } catch (error) {
       console.error('Failed to load timeline:', error)
     } finally {
@@ -24,69 +53,289 @@ export default function TimelinePage() {
     }
   }
 
+  // Filter events
+  const filteredEvents = events.filter(event => {
+    if (filter === 'all') return true
+    if (filter === 'migrations') return event.type.includes('migration')
+    if (filter === 'sql') return event.type.includes('sql') || event.type.includes('table')
+    if (filter === 'snapshots') return event.type.includes('snapshot')
+    if (filter === 'branches') return event.type.includes('branch')
+    return true
+  })
+
+  // Group by time
+  const groupedEvents = groupEventsByTime(filteredEvents)
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-studio-text-dim">Loading timeline...</div>
+      <div className="h-full flex items-center justify-center">
+        <Loader className="w-6 h-6 animate-spin text-app-accent" />
       </div>
     )
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Timeline</h1>
+    <div className="h-full flex flex-col bg-app-bg">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-app-border">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Timeline</h1>
+            <p className="text-sm text-app-text-dim">
+              Database activity history • Branch: <span className="text-app-accent font-medium">{currentBranch}</span>
+            </p>
+          </div>
 
-      {events.length === 0 ? (
-        <div className="bg-studio-sidebar border border-studio-border rounded-lg p-12 text-center">
-          <Clock className="w-12 h-12 mx-auto mb-4 text-studio-text-dim opacity-50" />
-          <p className="text-studio-text-dim">No events yet</p>
+          {/* Filter */}
+          <div className="relative">
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value as FilterType)}
+              className="px-3 py-2 bg-app-sidebar border border-app-border rounded text-sm appearance-none pr-8 cursor-pointer hover:border-app-border-hover transition-colors focus:outline-none focus:border-app-accent"
+            >
+              <option value="all">All</option>
+              <option value="migrations">Migrations</option>
+              <option value="sql">SQL</option>
+              <option value="snapshots">Snapshots</option>
+              <option value="branches">Branches</option>
+            </select>
+            <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 text-app-text-dim pointer-events-none" />
+          </div>
         </div>
-      ) : (
-        <div className="space-y-4">
-          {events.map((event) => (
-            <TimelineEvent key={event.id} event={event} />
-          ))}
+      </div>
+
+      {/* Events List */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {filteredEvents.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-app-text-dim">
+            <Clock className="w-12 h-12 mb-3 opacity-50" />
+            <p className="text-lg">No events yet</p>
+            <p className="text-sm mt-1">Activity will appear here as you use LocalDB</p>
+          </div>
+        ) : (
+          <div className="max-w-4xl mx-auto space-y-6">
+            {Object.entries(groupedEvents).map(([timeGroup, groupEvents]) => (
+              <div key={timeGroup}>
+                {/* Time Group Header */}
+                <div className="text-xs font-semibold text-app-text-dim uppercase mb-3">
+                  {timeGroup}
+                </div>
+
+                {/* Events in Group */}
+                <div className="space-y-2">
+                  {groupEvents.map((event) => (
+                    <TimelineEventRow
+                      key={event.id}
+                      event={event}
+                      currentBranch={currentBranch}
+                      expanded={expandedEvent === event.id}
+                      onToggleExpand={() => setExpandedEvent(
+                        expandedEvent === event.id ? null : event.id
+                      )}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function groupEventsByTime(events: TimelineEvent[]): Record<string, TimelineEvent[]> {
+  const groups: Record<string, TimelineEvent[]> = {}
+
+  events.forEach(event => {
+    const date = new Date(event.createdAt)
+    let groupKey: string
+
+    if (isToday(date)) {
+      groupKey = 'Today'
+    } else if (isYesterday(date)) {
+      groupKey = 'Yesterday'
+    } else {
+      groupKey = format(date, 'MMMM d, yyyy')
+    }
+
+    if (!groups[groupKey]) {
+      groups[groupKey] = []
+    }
+    groups[groupKey].push(event)
+  })
+
+  return groups
+}
+
+function TimelineEventRow({
+  event,
+  currentBranch,
+  expanded,
+  onToggleExpand
+}: {
+  event: TimelineEvent
+  currentBranch: string
+  expanded: boolean
+  onToggleExpand: () => void
+}) {
+  const icon = getEventIcon(event.type)
+  const color = getEventColor(event.type)
+  const hasDetails = shouldShowDetails(event.type)
+
+  return (
+    <div className="bg-app-sidebar border border-app-border rounded-lg overflow-hidden hover:border-app-border-hover transition-colors">
+      {/* Event Row */}
+      <div className="p-4">
+        <div className="flex gap-4">
+          {/* Icon */}
+          <div className={`flex-shrink-0 w-10 h-10 rounded-lg ${color} flex items-center justify-center`}>
+            {icon}
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm">{formatEventType(event.type)}</h3>
+                {event.branch && (
+                  <span
+                    className={`
+                      px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1
+                      ${event.branch === currentBranch
+                        ? 'bg-app-accent/20 text-app-accent'
+                        : 'bg-app-sidebar-active text-app-text-dim'
+                      }
+                    `}
+                  >
+                    <GitBranch className="w-3 h-3" />
+                    {event.branch}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-app-text-dim whitespace-nowrap">
+                {formatDistanceToNow(new Date(event.createdAt), { addSuffix: true })}
+              </span>
+            </div>
+
+            {/* Short Summary */}
+            <EventSummary event={event} />
+          </div>
+
+          {/* Expand Button */}
+          {hasDetails && (
+            <button
+              onClick={onToggleExpand}
+              className="flex-shrink-0 text-app-text-dim hover:text-app-text transition-colors"
+            >
+              {expanded ? (
+                <ChevronDown className="w-5 h-5" />
+              ) : (
+                <ChevronRight className="w-5 h-5" />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded Details */}
+      {expanded && hasDetails && (
+        <div className="border-t border-app-border px-4 py-4 bg-app-bg/50">
+          <EventDetails event={event} />
         </div>
       )}
     </div>
   )
 }
 
-function TimelineEvent({ event }: { event: any }) {
-  const icon = getEventIcon(event.type)
-  const color = getEventColor(event.type)
+function EventSummary({ event }: { event: TimelineEvent }) {
+  const { type, data } = event
 
-  return (
-    <div className="bg-studio-sidebar border border-studio-border rounded-lg p-4 hover:border-studio-hover transition-colors">
-      <div className="flex gap-4">
-        <div className={`flex-shrink-0 w-10 h-10 rounded-lg ${color} flex items-center justify-center`}>
-          {icon}
+  switch (type) {
+    case 'migration_applied':
+    case 'migration_created':
+      return (
+        <div className="text-sm text-app-text-dim">
+          <span className="font-mono text-app-accent">{data.filename || data.name}</span>
         </div>
+      )
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-4 mb-2">
-            <h3 className="font-semibold">{formatEventType(event.type)}</h3>
-            <span className="text-xs text-studio-text-dim whitespace-nowrap">
-              {formatDistanceToNow(new Date(event.createdAt), { addSuffix: true })}
-            </span>
-          </div>
-
-          <EventDetails type={event.type} data={event.data} />
+    case 'migration_failed':
+      return (
+        <div className="text-sm text-red-400">
+          <span className="font-mono">{data.filename}</span> • Failed
         </div>
-      </div>
-    </div>
-  )
+      )
+
+    case 'sql_executed':
+      return (
+        <div className="text-sm text-app-text-dim font-mono truncate">
+          {data.sql?.split('\n')[0] || 'SQL query'}
+        </div>
+      )
+
+    case 'sql_error':
+      return (
+        <div className="text-sm text-red-400 font-mono truncate">
+          {data.sql?.split('\n')[0] || 'SQL query'} • Error
+        </div>
+      )
+
+    case 'snapshot_created':
+      return (
+        <div className="text-sm text-app-text-dim">
+          <span className="font-mono text-app-accent">{data.name || data.filename}</span>
+          {data.size && <span className="ml-2 text-xs">({(data.size / 1024).toFixed(2)} KB)</span>}
+        </div>
+      )
+
+    case 'snapshot_restored':
+      return (
+        <div className="text-sm text-app-text-dim">
+          Restored from <span className="font-mono text-app-accent">{data.filename}</span>
+        </div>
+      )
+
+    case 'branch_created':
+      return (
+        <div className="text-sm text-app-text-dim">
+          Created <span className="font-mono text-app-accent">{data.name}</span>
+          {data.copyFrom && <span> from {data.copyFrom}</span>}
+        </div>
+      )
+
+    case 'branch_switched':
+      return (
+        <div className="text-sm text-app-text-dim">
+          Switched to <span className="font-mono text-app-accent">{data.to}</span>
+          {data.from && <span> from {data.from}</span>}
+        </div>
+      )
+
+    case 'table_created':
+    case 'table_dropped':
+      return (
+        <div className="text-sm text-app-text-dim">
+          {data.tableName && <span className="font-mono text-app-accent">{data.tableName}</span>}
+        </div>
+      )
+
+    default:
+      return <div className="text-sm text-app-text-dim">Activity recorded</div>
+  }
 }
 
-function EventDetails({ type, data }: { type: string; data: any }) {
+function EventDetails({ event }: { event: TimelineEvent }) {
+  const { type, data } = event
+
   switch (type) {
     case 'sql_executed':
       return (
         <div className="space-y-2">
-          <pre className="text-sm bg-studio-bg border border-studio-border rounded p-3 overflow-x-auto font-mono">
+          <pre className="text-xs bg-app-bg border border-app-border rounded p-3 overflow-x-auto font-mono max-h-60 overflow-y-auto">
             {data.sql}
           </pre>
-          <div className="flex gap-4 text-xs text-studio-text-dim">
+          <div className="flex gap-4 text-xs text-app-text-dim">
             <span>Type: {data.type}</span>
             <span>Time: {data.executionTime}ms</span>
             {data.changes && <span>Changes: {data.changes}</span>}
@@ -98,7 +347,7 @@ function EventDetails({ type, data }: { type: string; data: any }) {
     case 'sql_error':
       return (
         <div className="space-y-2">
-          <pre className="text-sm bg-studio-bg border border-studio-border rounded p-3 overflow-x-auto font-mono">
+          <pre className="text-xs bg-app-bg border border-app-border rounded p-3 overflow-x-auto font-mono max-h-40 overflow-y-auto">
             {data.sql}
           </pre>
           <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2">
@@ -108,44 +357,72 @@ function EventDetails({ type, data }: { type: string; data: any }) {
       )
 
     case 'migration_applied':
+    case 'migration_created':
+    case 'migration_failed':
       return (
-        <div className="text-sm text-studio-text-dim">
-          Applied migration: <span className="font-mono">{data.filename}</span>
+        <div className="space-y-2">
+          <div className="text-xs text-app-text-dim">
+            Migration: <span className="font-mono text-app-accent">{data.filename || data.name}</span>
+          </div>
+          {data.error && (
+            <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2">
+              {data.error}
+            </div>
+          )}
         </div>
       )
 
     case 'snapshot_created':
       return (
-        <div className="text-sm text-studio-text-dim">
-          Created snapshot: <span className="font-mono">{data.filename}</span>
-          <span className="ml-2">({(data.size / 1024).toFixed(2)} KB)</span>
+        <div className="space-y-2">
+          <div className="text-xs text-app-text-dim space-y-1">
+            <div>Snapshot: <span className="font-mono text-app-accent">{data.name || data.filename}</span></div>
+            {data.size && <div>Size: {(data.size / 1024).toFixed(2)} KB</div>}
+            {data.description && <div>Description: {data.description}</div>}
+          </div>
         </div>
       )
 
     case 'snapshot_restored':
       return (
-        <div className="text-sm text-studio-text-dim">
-          Restored from: <span className="font-mono">{data.filename}</span>
+        <div className="space-y-2">
+          <div className="text-xs text-app-text-dim">
+            Restored from: <span className="font-mono text-app-accent">{data.filename}</span>
+          </div>
+          <div className="text-xs text-yellow-400 bg-yellow-500/10 border border-yellow-500/30 rounded p-2">
+            ⚠ Database state was reset to this snapshot
+          </div>
+        </div>
+      )
+
+    case 'branch_created':
+      return (
+        <div className="space-y-2">
+          <div className="text-xs text-app-text-dim space-y-1">
+            <div>Branch: <span className="font-mono text-app-accent">{data.name}</span></div>
+            {data.copyFrom && <div>Copied from: {data.copyFrom}</div>}
+            {data.description && <div>Description: {data.description}</div>}
+          </div>
+        </div>
+      )
+
+    case 'branch_switched':
+      return (
+        <div className="text-xs text-app-text-dim">
+          Switched from <span className="font-mono">{data.from}</span> to <span className="font-mono text-app-accent">{data.to}</span>
         </div>
       )
 
     case 'table_created':
       return (
-        <pre className="text-sm bg-studio-bg border border-studio-border rounded p-3 overflow-x-auto font-mono">
+        <pre className="text-xs bg-app-bg border border-app-border rounded p-3 overflow-x-auto font-mono max-h-60 overflow-y-auto">
           {data.sql}
         </pre>
       )
 
-    case 'table_dropped':
-      return (
-        <div className="text-sm text-studio-text-dim">
-          Dropped table: <span className="font-mono">{data.tableName}</span>
-        </div>
-      )
-
     default:
       return (
-        <pre className="text-sm text-studio-text-dim">
+        <pre className="text-xs text-app-text-dim">
           {JSON.stringify(data, null, 2)}
         </pre>
       )
@@ -164,7 +441,12 @@ function getEventIcon(type: string) {
     case 'snapshot_restored':
       return <Camera className="w-5 h-5" />
     case 'migration_applied':
+    case 'migration_created':
+    case 'migration_failed':
       return <Clock className="w-5 h-5" />
+    case 'branch_created':
+    case 'branch_switched':
+      return <GitBranch className="w-5 h-5" />
     default:
       return <AlertCircle className="w-5 h-5" />
   }
@@ -175,6 +457,7 @@ function getEventColor(type: string) {
     case 'sql_executed':
       return 'bg-green-500/20 text-green-400'
     case 'sql_error':
+    case 'migration_failed':
       return 'bg-red-500/20 text-red-400'
     case 'table_created':
       return 'bg-blue-500/20 text-blue-400'
@@ -184,7 +467,11 @@ function getEventColor(type: string) {
     case 'snapshot_restored':
       return 'bg-purple-500/20 text-purple-400'
     case 'migration_applied':
+    case 'migration_created':
       return 'bg-yellow-500/20 text-yellow-400'
+    case 'branch_created':
+    case 'branch_switched':
+      return 'bg-cyan-500/20 text-cyan-400'
     default:
       return 'bg-gray-500/20 text-gray-400'
   }
@@ -194,4 +481,10 @@ function formatEventType(type: string): string {
   return type.split('_').map(word =>
     word.charAt(0).toUpperCase() + word.slice(1)
   ).join(' ')
+}
+
+function shouldShowDetails(type: string): boolean {
+  // Events that have expandable details
+  return ['sql_executed', 'sql_error', 'migration_applied', 'migration_created', 'migration_failed',
+    'snapshot_created', 'snapshot_restored', 'branch_created', 'table_created'].includes(type)
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Table2, Plus } from 'lucide-react'
-import InnerSidebar from './InnerSidebar'
+import TablesSidebar from './TablesSidebar'
 import { getTables, getTableInfo, getTableData } from '@/lib/api'
 
 export default function DatabasePage() {
@@ -50,26 +50,13 @@ export default function DatabasePage() {
     }
   }
 
-  // Prepare sidebar data
-  const sidebarSections = [
-    {
-      id: 'tables',
-      label: 'Tables',
-      items: tables.map(table => ({
-        id: table.name,
-        label: table.name,
-        icon: <Table2 className="w-3 h-3" />,
-        active: selectedTable === table.name
-      }))
-    }
-  ]
-
   return (
     <div className="flex h-full">
-      {/* Inner Sidebar */}
-      <InnerSidebar 
-        sections={sidebarSections}
-        onItemClick={(_, tableId) => setSelectedTable(tableId)}
+      {/* Tables Sidebar */}
+      <TablesSidebar
+        tables={tables}
+        selectedTable={selectedTable}
+        onTableSelect={(tableName) => setSelectedTable(tableName)}
         width="220px"
       />
 

@@ -2,17 +2,45 @@ import { spawn } from 'child_process';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import http from 'http';
 import chalk from 'chalk';
 import ora from 'ora';
 import open from 'open';
-import { 
-  getProjectPath, 
+import {
+  getProjectPath,
   getProjectServerInfoPath,
-  projectExists 
+  projectExists
 } from '../utils/paths.js';
 import { findFreePort } from '../utils/port-finder.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Helper function to check if server is ready
+async function waitForServer(port, maxAttempts = 30) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const req = http.get(`http://localhost:${port}/api/project`, (res) => {
+          if (res.statusCode === 200) {
+            resolve();
+          } else {
+            reject(new Error(`Server returned ${res.statusCode}`));
+          }
+        });
+        req.on('error', reject);
+        req.setTimeout(1000, () => {
+          req.destroy();
+          reject(new Error('Timeout'));
+        });
+      });
+      return true;
+    } catch (e) {
+      // Server not ready yet, wait and retry
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  return false;
+}
 
 export async function startCommand(name) {
   if (!projectExists(name)) {
@@ -45,9 +73,10 @@ export async function startCommand(name) {
   }
   
   const spinner = ora(`Starting project "${name}"...`).start();
-  
+
   try {
-    const port = await findFreePort(3000);
+    // Find and reserve a port for this project
+    const port = await findFreePort(3000, name);
     const projectPath = getProjectPath(name);
     
     // Path to server package
@@ -74,14 +103,21 @@ export async function startCommand(name) {
       started_at: new Date().toISOString()
     };
     writeFileSync(serverInfoPath, JSON.stringify(serverInfo, null, 2));
-    
-    // Wait for server to start
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
+
+    // Wait for server to be ready
+    spinner.text = `Waiting for server to start...`;
+    const serverReady = await waitForServer(port);
+
+    if (!serverReady) {
+      spinner.fail(chalk.red('✗ Server failed to start in time'));
+      console.log(chalk.yellow('⚠ Server might still be starting. Check logs for errors.'));
+      process.exit(1);
+    }
+
     spinner.succeed(chalk.green(`✓ Project "${name}" started`));
     console.log(chalk.dim(`   URL: ${chalk.cyan(`http://localhost:${port}`)}`));
     console.log(chalk.dim(`   PID: ${serverProcess.pid}`));
-    
+
     // Open browser
     await open(`http://localhost:${port}`);
   } catch (error) {

@@ -8,13 +8,17 @@ import TablesPage from '@/components/TablesPage'
 import SQLEditorPage from '@/components/SQLEditorPage'
 import TimelinePage from '@/components/TimelinePage'
 import SnapshotsPage from '@/components/SnapshotsPage'
+import MigrationsPage from '@/components/MigrationsPage'
+import BranchCreateModal from '@/components/BranchCreateModal'
+import { AppProvider, useAppContext } from '@/contexts/AppContext'
 import { getProjectInfo } from '@/lib/api'
 
-type Page = 'home' | 'sql' | 'database' | 'snapshots' | 'timeline' | 'settings'
+type Page = 'home' | 'sql' | 'database' | 'migrations' | 'snapshots' | 'timeline' | 'settings'
 
-export default function App() {
+function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('home')
-  const [projectInfo, setProjectInfo] = useState<any>(null)
+  const [showBranchModal, setShowBranchModal] = useState(false)
+  const { projectInfo, setProjectInfo } = useAppContext()
 
   useEffect(() => {
     loadProjectInfo()
@@ -29,25 +33,35 @@ export default function App() {
     }
   }
 
-  // Determine which features to show in top bar
-  const topBarProps = {
-    projectInfo,
-    showCompare: currentPage === 'sql',
-    showBranch: currentPage === 'sql',
-    showAI: currentPage === 'sql',
+  function handleBranchChange() {
+    loadProjectInfo()
   }
+
+  function handleCreateBranch() {
+    setShowBranchModal(true)
+  }
+
+  // Show AI button only on SQL editor page
+  const showAI = currentPage === 'sql'
 
   return (
     <div className="flex h-screen bg-app-bg text-app-text">
       <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
-      
+
       <div className="flex-1 flex flex-col overflow-hidden">
-        <TopBar {...topBarProps} />
-        
+        <TopBar
+          projectInfo={projectInfo}
+          currentBranch={projectInfo?.currentBranch}
+          onBranchChange={handleBranchChange}
+          onCreateBranchClick={handleCreateBranch}
+          showAI={showAI}
+        />
+
         <main className="flex-1 overflow-hidden">
           {currentPage === 'home' && <HomePage projectInfo={projectInfo} />}
           {currentPage === 'sql' && <SQLEditorPage />}
           {currentPage === 'database' && <TablesPage />}
+          {currentPage === 'migrations' && <MigrationsPage />}
           {currentPage === 'timeline' && <TimelinePage />}
           {currentPage === 'snapshots' && <SnapshotsPage />}
           {currentPage === 'settings' && (
@@ -58,6 +72,22 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Branch Create Modal */}
+      <BranchCreateModal
+        isOpen={showBranchModal}
+        onClose={() => setShowBranchModal(false)}
+        currentBranch={projectInfo?.currentBranch || 'main'}
+        onSuccess={handleBranchChange}
+      />
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <AppProvider>
+      <AppContent />
+    </AppProvider>
   )
 }

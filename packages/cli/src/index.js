@@ -6,6 +6,7 @@ import { stopCommand } from './commands/stop.js';
 import { listCommand } from './commands/list.js';
 import { deleteCommand } from './commands/delete.js';
 import { openCommand } from './commands/open.js';
+import { portsCommand } from './commands/ports.js';
 
 const program = new Command();
 
@@ -43,5 +44,11 @@ program
   .command('delete <name>')
   .description('Delete a database project')
   .action(deleteCommand);
+
+program
+  .command('ports')
+  .description('View and manage port allocations')
+  .option('--cleanup', 'Clean up stale port allocations')
+  .action(portsCommand);
 
 program.parse();

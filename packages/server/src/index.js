@@ -3,16 +3,22 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
+import { createRequire } from 'module';
 
-import { getUserDb, getMetaDb } from './db/connections.js';
+import { getUserDb, getMetaDb, getCurrentBranch } from './db/connections.js';
 import tablesRoutes from './routes/tables.js';
 import queryRoutes from './routes/query.js';
 import schemaRoutes from './routes/schema.js';
 import timelineRoutes from './routes/timeline.js';
 import migrationsRoutes from './routes/migrations.js';
 import snapshotsRoutes from './routes/snapshots.js';
+import branchesRoutes from './routes/branches.js';
 
+// Import meta migration
+import { migrateMetaDb } from '../../cli/src/utils/meta-migration.js';
+
+const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const PROJECT_NAME = process.env.PROJECT_NAME;
@@ -21,6 +27,15 @@ const PORT = parseInt(process.env.PORT || '3000');
 
 if (!PROJECT_NAME || !PROJECT_PATH) {
   console.error('Missing required environment variables');
+  process.exit(1);
+}
+
+// Run meta database migration before starting server
+const metaDbPath = join(PROJECT_PATH, '.studio', 'meta.db');
+try {
+  migrateMetaDb(metaDbPath);
+} catch (error) {
+  console.error('Failed to migrate meta database:', error);
   process.exit(1);
 }
 
@@ -40,8 +55,10 @@ fastify.decorate('projectName', PROJECT_NAME);
 fastify.decorate('projectPath', PROJECT_PATH);
 fastify.decorate('getUserDb', () => getUserDb(PROJECT_PATH));
 fastify.decorate('getMetaDb', () => getMetaDb(PROJECT_PATH));
+fastify.decorate('getCurrentBranch', () => getCurrentBranch(PROJECT_PATH));
 
 // API Routes
+fastify.register(branchesRoutes, { prefix: '/api/branches' });
 fastify.register(tablesRoutes, { prefix: '/api/tables' });
 fastify.register(queryRoutes, { prefix: '/api/query' });
 fastify.register(schemaRoutes, { prefix: '/api/schema' });
@@ -53,11 +70,13 @@ fastify.register(snapshotsRoutes, { prefix: '/api/snapshots' });
 fastify.get('/api/project', async (request, reply) => {
   const configPath = join(PROJECT_PATH, 'config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-  
+  const currentBranch = getCurrentBranch(PROJECT_PATH);
+
   return {
     name: PROJECT_NAME,
     path: PROJECT_PATH,
     port: PORT,
+    currentBranch,
     ...config
   };
 });
@@ -77,7 +96,8 @@ if (!existsSync(studioPath)) {
 await fastify.register(fastifyStatic, {
   root: studioPath,
   prefix: '/',
-  decorateReply: false
+  decorateReply: false,
+  index: 'index.html'
 });
 
 // Fallback to index.html for client-side routing
@@ -92,23 +112,23 @@ fastify.setNotFoundHandler((request, reply) => {
 // Graceful shutdown
 const closeGracefully = async (signal) => {
   console.log(`\nReceived ${signal}, closing gracefully...`);
-  
+
   try {
     // Close database connections
     const userDb = getUserDb(PROJECT_PATH);
     const metaDb = getMetaDb(PROJECT_PATH);
     userDb.close();
     metaDb.close();
-    
+
     // Remove server info file
     const serverInfoPath = join(PROJECT_PATH, '.studio', 'server.json');
     if (existsSync(serverInfoPath)) {
-      writeFileSync(serverInfoPath, '');
+      unlinkSync(serverInfoPath);
     }
   } catch (e) {
     console.error('Error during shutdown:', e);
   }
-  
+
   await fastify.close();
   process.exit(0);
 };

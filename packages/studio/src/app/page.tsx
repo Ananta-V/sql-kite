@@ -19,6 +19,7 @@ type Page = 'home' | 'sql' | 'database' | 'branches' | 'migrations' | 'snapshots
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('home')
   const [showBranchModal, setShowBranchModal] = useState(false)
+  const [showAIPanel, setShowAIPanel] = useState(false)
   const { projectInfo, setProjectInfo } = useAppContext()
 
   useEffect(() => {
@@ -56,6 +57,7 @@ function AppContent() {
           onBranchChange={handleBranchChange}
           onCreateBranchClick={handleCreateBranch}
           showAI={showAI}
+          onAIClick={() => setShowAIPanel((open) => !open)}
         />
 
         <main className="flex-1 overflow-hidden">
@@ -80,6 +82,35 @@ function AppContent() {
           )}
         </main>
       </div>
+
+      {showAI && showAIPanel && (
+        <div className="fixed inset-0 z-50">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowAIPanel(false)}
+          />
+          <aside className="absolute right-0 top-0 h-full w-full max-w-md bg-app-sidebar border-l border-app-border shadow-2xl flex flex-col">
+            <div className="h-12 px-4 border-b border-app-border flex items-center justify-between">
+              <div className="text-sm font-semibold">AI Assistant</div>
+              <button
+                onClick={() => setShowAIPanel(false)}
+                className="px-2 py-1 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded transition-colors"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 p-6 flex flex-col items-center justify-center text-center">
+              <div className="text-2xl font-bold mb-2">Comming soon</div>
+              <p className="text-sm text-app-text-dim max-w-sm">
+                We are building a focused assistant for SQL, schema insights, and query tuning.
+              </p>
+              <div className="mt-6 w-full max-w-xs rounded-lg border border-app-border bg-app-bg/60 p-4 text-xs text-app-text-dim">
+                Stay tuned for guided query help, ER diagram hints, and migration suggestions.
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* Branch Create Modal */}
       <BranchCreateModal

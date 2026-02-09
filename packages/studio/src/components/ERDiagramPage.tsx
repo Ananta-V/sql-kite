@@ -12,6 +12,7 @@ import ReactFlow, {
   ConnectionLineType,
   Panel,
   Position,
+  Handle,
   MarkerType
 } from 'reactflow'
 import dagre from 'dagre'
@@ -52,6 +53,16 @@ interface ERData {
 function TableNode({ data }: { data: { label: string; columns: Column[]; foreignKeys: string[] } }) {
   return (
     <div className="bg-app-sidebar border-2 border-app-border rounded-lg shadow-lg min-w-[220px]">
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-transparent !border-0 !w-2 !h-2"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-transparent !border-0 !w-2 !h-2"
+      />
       {/* Table Header */}
       <div className="px-3 py-2 bg-app-bg border-b border-app-border rounded-t-lg">
         <div className="font-semibold text-sm text-app-text">{data.label}</div>

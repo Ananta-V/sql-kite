@@ -3,7 +3,7 @@
 import { Home, Code, Database, Camera, Clock, Settings, Menu, GitBranch } from 'lucide-react'
 import { useState } from 'react'
 
-type Page = 'home' | 'sql' | 'database' | 'migrations' | 'snapshots' | 'timeline' | 'settings'
+type Page = 'home' | 'sql' | 'database' | 'branches' | 'migrations' | 'snapshots' | 'timeline' | 'settings'
 
 interface SidebarProps {
   currentPage: Page
@@ -17,7 +17,8 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     { id: 'home' as Page, icon: Home, label: 'Dashboard' },
     { id: 'sql' as Page, icon: Code, label: 'SQL Editor' },
     { id: 'database' as Page, icon: Database, label: 'Database' },
-    { id: 'migrations' as Page, icon: GitBranch, label: 'Migrations' },
+    { id: 'branches' as Page, icon: GitBranch, label: 'Branches' },
+    { id: 'migrations' as Page, icon: Clock, label: 'Migrations' },
     { id: 'snapshots' as Page, icon: Camera, label: 'Snapshots' },
     { id: 'timeline' as Page, icon: Clock, label: 'Timeline' },
     { id: 'settings' as Page, icon: Settings, label: 'Settings' },

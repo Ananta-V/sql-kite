@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getCurrentBranch, closeBranchConnection, getMetaDb } from '../db/connections.js';
 
@@ -67,16 +67,26 @@ export default async function branchesRoutes(fastify, options) {
 
   /**
    * Create a new branch
+   * 
+   * RULE: Every branch must be created from an existing branch.
+   * No empty databases. No undefined states.
    */
   fastify.post('/create', async (request, reply) => {
-    const { name, description, copyFrom } = request.body;
+    const { name, description, baseBranch } = request.body;
     const metaDb = fastify.getMetaDb();
     const currentBranch = getCurrentBranch(fastify.projectPath);
 
     // Validate branch name
-    if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
+    if (!name || !/^[a-zA-Z0-9_/-]+$/.test(name)) {
       return reply.code(400).send({
-        error: 'Invalid branch name. Use only letters, numbers, hyphens, and underscores.'
+        error: 'Invalid branch name. Use only letters, numbers, hyphens, slashes, and underscores.'
+      });
+    }
+
+    // Base branch is REQUIRED - no exceptions
+    if (!baseBranch) {
+      return reply.code(400).send({
+        error: 'Base branch is required. Every branch must be created from an existing branch.'
       });
     }
 
@@ -90,26 +100,32 @@ export default async function branchesRoutes(fastify, options) {
     }
 
     try {
-      const sourceBranch = copyFrom || currentBranch;
-
       // Get source branch DB file
       const sourceInfo = metaDb.prepare(`
         SELECT db_file FROM branches WHERE name = ?
-      `).get(sourceBranch);
+      `).get(baseBranch);
 
       if (!sourceInfo) {
-        return reply.code(404).send({ error: 'Source branch not found' });
+        return reply.code(404).send({ error: `Base branch "${baseBranch}" not found` });
       }
 
-      // New DB file name
-      const newDbFile = `${name}.db.sqlite`;
       const sourceDbPath = join(fastify.projectPath, sourceInfo.db_file);
+      const newDbFile = `${name}.db.sqlite`;
       const newDbPath = join(fastify.projectPath, newDbFile);
 
-      // Copy database file
+      // CRITICAL: Checkpoint WAL to ensure clean snapshot
+      // This freezes the base branch state at this exact moment
+      try {
+        const sourceDb = fastify.getUserDb(baseBranch);
+        sourceDb.pragma('wal_checkpoint(TRUNCATE)');
+      } catch (walError) {
+        console.warn('WAL checkpoint warning:', walError.message);
+      }
+
+      // Copy database file (full snapshot)
       copyFileSync(sourceDbPath, newDbPath);
 
-      // Also copy WAL and SHM files if they exist
+      // Copy WAL and SHM files if they exist (though checkpoint should have cleared them)
       ['.wal', '.shm'].forEach(ext => {
         const sourceWalPath = sourceDbPath + ext;
         const newWalPath = newDbPath + ext;
@@ -118,19 +134,51 @@ export default async function branchesRoutes(fastify, options) {
         }
       });
 
-      // Create branch record
+      // Get snapshot metadata (file size, etc.)
+      const { statSync } = await import('fs');
+      const dbStats = statSync(newDbPath);
+      const snapshotTime = new Date().toISOString();
+
+      // Ensure snapshots directory exists
+      const snapshotsDir = join(fastify.projectPath, '.studio', 'snapshots');
+      if (!existsSync(snapshotsDir)) {
+        mkdirSync(snapshotsDir, { recursive: true });
+      }
+
+      // Create branch record with full metadata
       metaDb.prepare(`
         INSERT INTO branches (name, db_file, created_from, description)
         VALUES (?, ?, ?, ?)
-      `).run(name, newDbFile, sourceBranch, description || '');
+      `).run(name, newDbFile, baseBranch, description || '');
 
-      // Log event in CURRENT branch (the one we created from)
+      // Create implicit snapshot for this branch creation
+      // This gives us traceability and restore capability
+      const snapshotFilename = `${name}-creation-${Date.now()}.snapshot.db`;
+      copyFileSync(newDbPath, join(fastify.projectPath, '.studio', 'snapshots', snapshotFilename));
+
+      metaDb.prepare(`
+        INSERT INTO snapshots (branch, filename, name, size, description)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(name, snapshotFilename, 'Branch Creation', dbStats.size, `Initial state copied from ${baseBranch}`);
+
+      // Log event in BOTH branches for full traceability
+      
+      // Event in source branch: "I was the base for a new branch"
+      metaDb.prepare(`
+        INSERT INTO events (branch, type, data)
+        VALUES (?, 'branch_created_from_here', ?)
+      `).run(baseBranch, JSON.stringify({
+        new_branch: name,
+        created_at: snapshotTime
+      }));
+
+      // Event in new branch: "I was created from a base branch"
       metaDb.prepare(`
         INSERT INTO events (branch, type, data)
         VALUES (?, 'branch_created', ?)
-      `).run(currentBranch, JSON.stringify({
-        branch: name,
-        from: sourceBranch
+      `).run(name, JSON.stringify({
+        base_branch: baseBranch,
+        created_at: snapshotTime
       }));
 
       return {
@@ -138,7 +186,9 @@ export default async function branchesRoutes(fastify, options) {
         branch: {
           name,
           db_file: newDbFile,
-          created_from: sourceBranch
+          created_from: baseBranch,
+          created_at: snapshotTime,
+          snapshot_created: true
         }
       };
     } catch (error) {
@@ -292,6 +342,137 @@ export default async function branchesRoutes(fastify, options) {
           snapshots: snapshotsCount.count,
           events: eventsCount.count
         }
+      };
+    } catch (error) {
+      reply.code(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * Promote a branch to another branch
+   * 
+   * Philosophy: Promote states, not scripts.
+   * This replaces the target branch DB with the source branch DB.
+   */
+  fastify.post('/promote', async (request, reply) => {
+    const { sourceBranch, targetBranch, createSnapshot = true } = request.body;
+    const metaDb = fastify.getMetaDb();
+    const currentBranch = getCurrentBranch(fastify.projectPath);
+
+    // Validation
+    if (!sourceBranch || !targetBranch) {
+      return reply.code(400).send({ error: 'Source and target branches required' });
+    }
+
+    if (sourceBranch === targetBranch) {
+      return reply.code(400).send({ error: 'Source and target must be different' });
+    }
+
+    try {
+      // Get both branch info
+      const source = metaDb.prepare(`
+        SELECT * FROM branches WHERE name = ?
+      `).get(sourceBranch);
+
+      const target = metaDb.prepare(`
+        SELECT * FROM branches WHERE name = ?
+      `).get(targetBranch);
+
+      if (!source) {
+        return reply.code(404).send({ error: `Source branch "${sourceBranch}" not found` });
+      }
+
+      if (!target) {
+        return reply.code(404).send({ error: `Target branch "${targetBranch}" not found` });
+      }
+
+      const sourceDbPath = join(fastify.projectPath, source.db_file);
+      const targetDbPath = join(fastify.projectPath, target.db_file);
+
+      // WAL checkpoint on both branches
+      try {
+        const sourceDb = fastify.getUserDb(sourceBranch);
+        const targetDb = fastify.getUserDb(targetBranch);
+        sourceDb.pragma('wal_checkpoint(TRUNCATE)');
+        targetDb.pragma('wal_checkpoint(TRUNCATE)');
+      } catch (walError) {
+        console.warn('WAL checkpoint warning:', walError.message);
+      }
+
+      // Close connections before file operations
+      closeBranchConnection(fastify.projectPath, sourceBranch);
+      closeBranchConnection(fastify.projectPath, targetBranch);
+
+      // Create snapshot of target before promotion (if requested)
+      let snapshotId = null;
+      if (createSnapshot) {
+        const snapshotsDir = join(fastify.projectPath, '.studio', 'snapshots');
+        if (!existsSync(snapshotsDir)) {
+          mkdirSync(snapshotsDir, { recursive: true });
+        }
+
+        const snapshotFilename = `${targetBranch}-pre-promote-${Date.now()}.snapshot.db`;
+        const snapshotPath = join(snapshotsDir, snapshotFilename);
+        copyFileSync(targetDbPath, snapshotPath);
+
+        const { statSync } = await import('fs');
+        const snapshotStats = statSync(snapshotPath);
+
+        const result = metaDb.prepare(`
+          INSERT INTO snapshots (branch, filename, name, size, description)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          targetBranch,
+          snapshotFilename,
+          `Pre-promote snapshot`,
+          snapshotStats.size,
+          `Automatic snapshot before promoting ${sourceBranch} to ${targetBranch}`
+        );
+
+        snapshotId = result.lastInsertRowid;
+      }
+
+      // Replace target DB with source DB
+      copyFileSync(sourceDbPath, targetDbPath);
+
+      // Also copy WAL and SHM files
+      ['.wal', '.shm'].forEach(ext => {
+        const sourceWalPath = sourceDbPath + ext;
+        const targetWalPath = targetDbPath + ext;
+        if (existsSync(sourceWalPath)) {
+          copyFileSync(sourceWalPath, targetWalPath);
+        }
+      });
+
+      const promotionTime = new Date().toISOString();
+
+      // Log promotion event in target branch
+      metaDb.prepare(`
+        INSERT INTO events (branch, type, data)
+        VALUES (?, 'branch_promoted', ?)
+      `).run(targetBranch, JSON.stringify({
+        source: sourceBranch,
+        target: targetBranch,
+        promoted_at: promotionTime,
+        snapshot_id: snapshotId
+      }));
+
+      // Log in source branch that it was promoted
+      metaDb.prepare(`
+        INSERT INTO events (branch, type, data)
+        VALUES (?, 'branch_promoted_from_here', ?)
+      `).run(sourceBranch, JSON.stringify({
+        source: sourceBranch,
+        target: targetBranch,
+        promoted_at: promotionTime
+      }));
+
+      return {
+        success: true,
+        source: sourceBranch,
+        target: targetBranch,
+        snapshot_created: createSnapshot,
+        snapshot_id: snapshotId
       };
     } catch (error) {
       reply.code(500).send({ error: error.message });

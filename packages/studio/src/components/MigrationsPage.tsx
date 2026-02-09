@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Play, FileText, Check, X, Loader, ChevronRight, ChevronDown, AlertTriangle } from 'lucide-react'
-import { getMigrations, applyMigration, applyAllMigrations, getProjectInfo } from '@/lib/api'
+import { useState, useEffect, useRef } from 'react'
+import { Play, FileText, Check, X, Loader, ChevronRight, ChevronDown, AlertTriangle, Trash2, Download } from 'lucide-react'
+import { getMigrations, applyMigration, applyAllMigrations, getProjectInfo, getMigrationStatus, deleteMigration, exportAppliedMigrations, exportSchema } from '@/lib/api'
 
 interface Migration {
   filename: string
@@ -15,19 +15,39 @@ interface Migration {
   checksum?: string
   author?: string
   error?: string
+  applied_in_branches?: string[]
+  can_delete?: boolean
 }
 
 export default function MigrationsPage() {
   const [migrations, setMigrations] = useState<Migration[]>([])
   const [loading, setLoading] = useState(true)
   const [applying, setApplying] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [currentBranch, setCurrentBranch] = useState('main')
   const [expandedMigration, setExpandedMigration] = useState<string | null>(null)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadMigrations()
   }, [])
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false)
+      }
+    }
+
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showExportMenu])
 
   async function loadMigrations() {
     try {
@@ -37,13 +57,29 @@ export default function MigrationsPage() {
         getProjectInfo()
       ])
 
-      // Add risk calculation
-      const migrationsWithRisk = migrationsData.map((m: Migration) => ({
-        ...m,
-        risk: calculateRisk(m.content)
-      }))
+      // Load status for each migration (check if applied in ANY branch)
+      const migrationsWithStatus = await Promise.all(
+        migrationsData.map(async (m: Migration) => {
+          try {
+            const status = await getMigrationStatus(m.filename)
+            return {
+              ...m,
+              risk: calculateRisk(m.content),
+              applied_in_branches: status.applied_in_branches || [],
+              can_delete: status.can_delete
+            }
+          } catch (err) {
+            return {
+              ...m,
+              risk: calculateRisk(m.content),
+              applied_in_branches: [],
+              can_delete: true
+            }
+          }
+        })
+      )
 
-      setMigrations(migrationsWithRisk)
+      setMigrations(migrationsWithStatus)
       setCurrentBranch(projectData.currentBranch || 'main')
     } catch (err: any) {
       setError(err.message)
@@ -72,6 +108,29 @@ export default function MigrationsPage() {
     }
   }
 
+  async function handleDeleteMigration(filename: string, appliedInBranches: string[]) {
+    if (appliedInBranches.length > 0) {
+      // Should not reach here due to UI disabling, but double-check
+      alert(`Cannot delete migration. It has been applied in: ${appliedInBranches.join(', ')}`)
+      return
+    }
+
+    if (!confirm(`Are you sure you want to delete migration "${filename}"?\n\nThis migration has not been applied to any branch.`)) {
+      return
+    }
+
+    try {
+      setDeleting(filename)
+      setError(null)
+      await deleteMigration(filename)
+      await loadMigrations()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setDeleting(null)
+    }
+  }
+
   async function handleApplyAll() {
     try {
       setApplying('all')
@@ -82,6 +141,52 @@ export default function MigrationsPage() {
       setError(err.message)
     } finally {
       setApplying(null)
+    }
+  }
+
+  async function handleExportApplied() {
+    try {
+      setExporting(true)
+      setShowExportMenu(false)
+      const sql = await exportAppliedMigrations()
+      
+      // Download the file
+      const blob = new Blob([sql], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${currentBranch}_applied_migrations.sql`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleExportSchema() {
+    try {
+      setExporting(true)
+      setShowExportMenu(false)
+      const sql = await exportSchema()
+      
+      // Download the file
+      const blob = new Blob([sql], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${currentBranch}_schema.sql`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -139,8 +244,8 @@ export default function MigrationsPage() {
         </div>
 
         {/* Primary Action */}
-        {pendingMigrations.length > 0 && (
-          <div className="mt-4">
+        <div className="mt-4 flex items-center gap-3">
+          {pendingMigrations.length > 0 && (
             <button
               onClick={handleApplyAll}
               disabled={applying !== null}
@@ -158,8 +263,63 @@ export default function MigrationsPage() {
                 </>
               )}
             </button>
+          )}
+
+          {/* Export Dropdown */}
+          <div className="relative" ref={exportMenuRef}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              disabled={exporting}
+              className="px-4 py-2 bg-app-sidebar border border-app-border text-app-text rounded hover:bg-app-bg disabled:opacity-50 flex items-center gap-2 font-medium"
+            >
+              {exporting ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  <span>Exporting...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  <span>Export</span>
+                  <ChevronDown className="w-4 h-4" />
+                </>
+              )}
+            </button>
+
+            {showExportMenu && !exporting && (
+              <div className="absolute top-full left-0 mt-2 w-72 bg-app-sidebar border border-app-border rounded-lg shadow-2xl z-50 overflow-hidden">
+                <div className="px-3 py-2 bg-app-bg border-b border-app-border">
+                  <div className="text-xs font-semibold text-app-text-dim">EXPORT OPTIONS</div>
+                </div>
+
+                <button
+                  onClick={handleExportApplied}
+                  disabled={appliedMigrations.length === 0}
+                  className="w-full text-left px-3 py-2.5 hover:bg-app-bg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <div className="font-medium text-sm">Applied migrations</div>
+                  <div className="text-xs text-app-text-dim mt-0.5">
+                    {appliedMigrations.length > 0 
+                      ? `${appliedMigrations.length} migration${appliedMigrations.length === 1 ? '' : 's'} applied in ${currentBranch}`
+                      : 'No migrations applied in this branch'}
+                  </div>
+                </button>
+
+                <div className="border-t border-app-border" />
+
+                <button
+                  onClick={handleExportSchema}
+                  className="w-full text-left px-3 py-2.5 hover:bg-app-bg transition-colors"
+                >
+                  <div className="font-medium text-sm">Full schema (current state)</div>
+                  <div className="text-xs text-app-text-dim mt-0.5">
+                    Complete CREATE statements from {currentBranch}
+                  </div>
+                </button>
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
         {error && (
           <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-400">
@@ -198,7 +358,9 @@ export default function MigrationsPage() {
                   expandedMigration === migration.filename ? null : migration.filename
                 )}
                 onApply={() => handleApplyMigration(migration.filename)}
+                onDelete={() => handleDeleteMigration(migration.filename, migration.applied_in_branches || [])}
                 applying={applying === migration.filename}
+                deleting={deleting === migration.filename}
               />
             ))}
           </div>
@@ -214,14 +376,18 @@ function MigrationRow({
   expanded,
   onToggleExpand,
   onApply,
-  applying
+  onDelete,
+  applying,
+  deleting
 }: {
   migration: Migration
   currentBranch: string
   expanded: boolean
   onToggleExpand: () => void
   onApply: () => void
+  onDelete: () => void
   applying: boolean
+  deleting: boolean
 }) {
   const statusColor = migration.error ? 'red' : migration.applied ? 'green' : 'yellow'
   const statusText = migration.error ? 'Failed' : migration.applied ? 'Applied' : 'Pending'
@@ -309,6 +475,31 @@ function MigrationRow({
                 <span>Retry</span>
               )}
             </button>
+          )}
+
+          {/* Delete Button - Only if NEVER applied in ANY branch */}
+          {migration.can_delete && (migration.applied_in_branches || []).length === 0 ? (
+            <button
+              onClick={onDelete}
+              disabled={deleting}
+              className="p-1.5 text-red-400 hover:bg-red-500/10 disabled:opacity-50 rounded transition-colors flex-shrink-0"
+              title="Delete migration"
+            >
+              {deleting ? (
+                <Loader className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="w-3.5 h-3.5" />
+              )}
+            </button>
+          ) : (
+            (migration.applied_in_branches || []).length > 0 && (
+              <div 
+                className="p-1.5 text-app-text-dim opacity-30 cursor-not-allowed flex-shrink-0"
+                title={`This migration has been applied in ${migration.applied_in_branches?.join(', ')} and cannot be deleted.`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </div>
+            )
           )}
         </div>
       </div>

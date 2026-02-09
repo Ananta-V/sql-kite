@@ -182,4 +182,151 @@ export default async function migrationsRoutes(fastify, options) {
       reply.code(500).send({ error: error.message });
     }
   });
+
+  // Delete migration (only if NEVER applied in ANY branch)
+  fastify.delete('/:filename', async (request, reply) => {
+    const { filename } = request.params;
+    const migrationsPath = join(fastify.projectPath, 'migrations');
+    const metaDb = fastify.getMetaDb();
+    const currentBranch = fastify.getCurrentBranch();
+
+    try {
+      // CRITICAL: Check if migration was applied in ANY branch (not just current)
+      const appliedInAnyBranch = metaDb.prepare(`
+        SELECT branch FROM migrations WHERE filename = ? LIMIT 1
+      `).get(filename);
+
+      if (appliedInAnyBranch) {
+        return reply.code(400).send({
+          error: `Migration cannot be deleted. It has been applied in branch "${appliedInAnyBranch.branch}".`,
+          applied_in_branch: appliedInAnyBranch.branch,
+          reason: 'APPLIED_IN_BRANCH'
+        });
+      }
+
+      // Migration has never been applied - safe to delete
+      const filePath = join(migrationsPath, filename);
+      
+      if (!existsSync(filePath)) {
+        return reply.code(404).send({ error: 'Migration file not found' });
+      }
+
+      // Delete the file
+      const { unlinkSync } = await import('fs');
+      unlinkSync(filePath);
+
+      // Log deletion event
+      metaDb.prepare(`
+        INSERT INTO events (branch, type, data)
+        VALUES (?, 'migration_deleted', ?)
+      `).run(currentBranch, JSON.stringify({ filename }));
+
+      return {
+        success: true,
+        filename,
+        message: 'Migration deleted successfully'
+      };
+    } catch (error) {
+      reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // Get migration application status across ALL branches
+  fastify.get('/:filename/status', async (request, reply) => {
+    const { filename } = request.params;
+    const metaDb = fastify.getMetaDb();
+
+    try {
+      const applications = metaDb.prepare(`
+        SELECT branch, applied_at 
+        FROM migrations 
+        WHERE filename = ?
+        ORDER BY applied_at DESC
+      `).all(filename);
+
+      return {
+        filename,
+        applied_in_branches: applications.map(a => a.branch),
+        can_delete: applications.length === 0,
+        applications
+      };
+    } catch (error) {
+      reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // Export single migration file
+  fastify.get('/:filename/export', async (request, reply) => {
+    const { filename } = request.params;
+    const migrationsPath = join(fastify.projectPath, 'migrations');
+
+    try {
+      const filePath = join(migrationsPath, filename);
+      
+      if (!existsSync(filePath)) {
+        return reply.code(404).send({ error: 'Migration file not found' });
+      }
+
+      const content = readFileSync(filePath, 'utf-8');
+
+      // Set headers for file download
+      reply.header('Content-Type', 'text/plain');
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      
+      return content;
+    } catch (error) {
+      reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // Export all applied migrations for current branch (ordered)
+  fastify.get('/export/applied', async (request, reply) => {
+    const metaDb = fastify.getMetaDb();
+    const currentBranch = fastify.getCurrentBranch();
+    const migrationsPath = join(fastify.projectPath, 'migrations');
+
+    try {
+      // Get applied migrations in order
+      const applied = metaDb.prepare(`
+        SELECT filename, applied_at 
+        FROM migrations 
+        WHERE branch = ? 
+        ORDER BY id
+      `).all(currentBranch);
+
+      if (applied.length === 0) {
+        return reply.code(400).send({ 
+          error: 'No migrations have been applied in this branch' 
+        });
+      }
+
+      // Build combined SQL file
+      let combinedSql = `-- Applied migrations for branch: ${currentBranch}\n`;
+      combinedSql += `-- Generated: ${new Date().toISOString()}\n`;
+      combinedSql += `-- Total migrations: ${applied.length}\n\n`;
+
+      for (const migration of applied) {
+        const filePath = join(migrationsPath, migration.filename);
+        
+        if (existsSync(filePath)) {
+          const content = readFileSync(filePath, 'utf-8');
+          combinedSql += `-- ========================================\n`;
+          combinedSql += `-- Migration: ${migration.filename}\n`;
+          combinedSql += `-- Applied: ${migration.applied_at}\n`;
+          combinedSql += `-- ========================================\n\n`;
+          combinedSql += content;
+          combinedSql += `\n\n`;
+        }
+      }
+
+      const filename = `${fastify.projectPath.split(/[\\/]/).pop()}_${currentBranch}_migrations.sql`;
+
+      reply.header('Content-Type', 'text/plain');
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      
+      return combinedSql;
+    } catch (error) {
+      reply.code(500).send({ error: error.message });
+    }
+  });
 }

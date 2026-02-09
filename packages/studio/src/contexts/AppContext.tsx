@@ -4,7 +4,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 
 interface EditorState {
   sql: string
-  activeTab: 'result' | 'errors' | 'explain' | 'info'
+  activeTab: 'result' | 'errors' | 'info'
 }
 
 interface Favorite {
@@ -18,7 +18,7 @@ interface AppContextType {
   editorState: EditorState
   setEditorState: (state: EditorState) => void
   updateSQL: (sql: string) => void
-  updateActiveTab: (tab: 'result' | 'errors' | 'explain' | 'info') => void
+  updateActiveTab: (tab: 'result' | 'errors' | 'info') => void
 
   // Favorites
   addFavorite: (name: string, sql: string) => void
@@ -56,7 +56,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('localdb-sql-editor-content', sql)
   }
 
-  const updateActiveTab = (tab: 'result' | 'errors' | 'explain' | 'info') => {
+  const updateActiveTab = (tab: 'result' | 'errors' | 'info') => {
     setEditorStateInternal(prev => ({ ...prev, activeTab: tab }))
   }
 

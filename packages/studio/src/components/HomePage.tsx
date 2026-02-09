@@ -3,13 +3,17 @@
 import { useEffect, useState } from 'react'
 import { Database, Table2, Code, Clock } from 'lucide-react'
 import { getTables, getTimeline } from '@/lib/api'
+import ImportWizardModal from './ImportWizardModal'
 
 export default function HomePage({ projectInfo }: any) {
   const [tables, setTables] = useState<any[]>([])
   const [recentEvents, setRecentEvents] = useState<any[]>([])
+  const [showImportWizard, setShowImportWizard] = useState(false)
+  const [importSession, setImportSession] = useState<any>(null)
 
   useEffect(() => {
     loadData()
+    checkPendingImport()
   }, [])
 
   async function loadData() {
@@ -23,6 +27,34 @@ export default function HomePage({ projectInfo }: any) {
     } catch (error) {
       console.error('Failed to load data:', error)
     }
+  }
+
+  async function checkPendingImport() {
+    try {
+      const response = await fetch('/api/import/pending')
+      const data = await response.json()
+      
+      if (data.pending) {
+        setImportSession(data)
+        setShowImportWizard(true)
+      }
+    } catch (error) {
+      console.error('Failed to check pending import:', error)
+    }
+  }
+
+  async function handleImportComplete() {
+    setShowImportWizard(false)
+    
+    // Clear pending import session
+    try {
+      await fetch('/api/import/pending', { method: 'DELETE' })
+    } catch (error) {
+      console.error('Failed to clear import session:', error)
+    }
+
+    // Reload data
+    loadData()
   }
 
   return (
@@ -103,6 +135,15 @@ export default function HomePage({ projectInfo }: any) {
           </div>
         </div>
       </div>
+
+      {showImportWizard && importSession && (
+        <ImportWizardModal
+          isOpen={showImportWizard}
+          onClose={() => setShowImportWizard(false)}
+          onComplete={handleImportComplete}
+          initialData={importSession}
+        />
+      )}
     </div>
   )
 }

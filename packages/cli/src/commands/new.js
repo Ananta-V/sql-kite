@@ -26,12 +26,14 @@ export async function newCommand(name) {
     const studioPath = join(projectPath, '.studio');
     const migrationsPath = join(projectPath, 'migrations');
     const snapshotsPath = join(projectPath, 'snapshots');
+    const studioSnapshotsPath = join(studioPath, 'snapshots');
     
     // Create directories
     mkdirSync(projectPath, { recursive: true });
     mkdirSync(studioPath, { recursive: true });
     mkdirSync(migrationsPath, { recursive: true });
     mkdirSync(snapshotsPath, { recursive: true });
+    mkdirSync(studioSnapshotsPath, { recursive: true }); // For automatic branch snapshots
     
     // Initialize databases
     initUserDb(getProjectDbPath(name));

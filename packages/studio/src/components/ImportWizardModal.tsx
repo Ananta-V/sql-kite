@@ -104,11 +104,24 @@ export default function ImportWizardModal({ isOpen, onClose, initialData, onComp
         throw new Error(data.error || 'Failed to finalize import')
       }
 
+      const finalizeData = await finalizeRes.json()
+
       setProgress('Import complete!')
-      
+
+      if (onComplete) {
+        await Promise.resolve(onComplete())
+      }
+
+      if (finalizeData?.server?.port) {
+        setProgress('Launching Studio...')
+        setTimeout(() => {
+          window.location.href = `http://localhost:${finalizeData.server.port}`
+        }, 800)
+        return
+      }
+
       // Wait a moment for user to see success
       setTimeout(() => {
-        if (onComplete) onComplete()
         onClose()
       }, 1000)
 

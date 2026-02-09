@@ -40,6 +40,7 @@ interface Relation {
   toTable: string
   fromColumn: string
   toColumn: string
+  isInferred?: boolean
 }
 
 interface ERData {
@@ -164,15 +165,23 @@ export default function ERDiagramPage() {
         target: rel.toTable,
         type: 'smoothstep',
         animated: false,
-        style: { stroke: '#6366f1', strokeWidth: 2.5 },
+        style: {
+          stroke: rel.isInferred ? '#94a3b8' : '#6366f1',
+          strokeWidth: 2.5,
+          strokeDasharray: rel.isInferred ? '6 6' : undefined
+        },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: '#6366f1',
+          color: rel.isInferred ? '#94a3b8' : '#6366f1',
           width: 20,
           height: 20
         },
         label: `${rel.fromColumn} → ${rel.toColumn}`,
-        labelStyle: { fontSize: 11, fill: '#e4e4e7', fontWeight: 500 },
+        labelStyle: {
+          fontSize: 11,
+          fill: rel.isInferred ? '#94a3b8' : '#e4e4e7',
+          fontWeight: 500
+        },
         labelBgStyle: { fill: '#18181b', fillOpacity: 0.9, rx: 4, ry: 4 }
       }))
 
@@ -271,6 +280,11 @@ export default function ERDiagramPage() {
           {edges.length === 0 && nodes.length > 0 && (
             <div className="mt-2 text-xs text-yellow-400/80">
               💡 No foreign key relations found. Add FOREIGN KEY constraints to see connections.
+            </div>
+          )}
+          {edges.length > 0 && (
+            <div className="mt-2 text-xs text-app-text-dim">
+              Dashed links are inferred from primary key name matches.
             </div>
           )}
         </Panel>

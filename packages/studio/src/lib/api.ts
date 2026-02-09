@@ -82,9 +82,51 @@ export async function applyMigration(filename: string) {
   return res.json()
 }
 
+export async function deleteMigration(filename: string) {
+  const res = await fetch(`${API_BASE}/migrations/${filename}`, {
+    method: 'DELETE'
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Failed to delete migration')
+  return data
+}
+
+export async function getMigrationStatus(filename: string) {
+  const res = await fetch(`${API_BASE}/migrations/${filename}/status`)
+  if (!res.ok) throw new Error('Failed to get migration status')
+  return res.json()
+}
+
+export async function exportMigration(filename: string) {
+  const res = await fetch(`${API_BASE}/migrations/${filename}/export`)
+  if (!res.ok) throw new Error('Failed to export migration')
+  return res.text()
+}
+
+export async function exportAppliedMigrations() {
+  const res = await fetch(`${API_BASE}/migrations/export/applied`)
+  if (!res.ok) {
+    const data = await res.json()
+    throw new Error(data.error || 'Failed to export applied migrations')
+  }
+  return res.text()
+}
+
+export async function exportSchema() {
+  const res = await fetch(`${API_BASE}/schema/export`)
+  if (!res.ok) throw new Error('Failed to export schema')
+  return res.text()
+}
+
 export async function getSchema() {
   const res = await fetch(`${API_BASE}/schema`)
   if (!res.ok) throw new Error('Failed to fetch schema')
+  return res.json()
+}
+
+export async function getERDiagram() {
+  const res = await fetch(`${API_BASE}/schema/er`)
+  if (!res.ok) throw new Error('Failed to fetch ER diagram data')
   return res.json()
 }
 
@@ -119,11 +161,11 @@ export async function getCurrentBranch() {
   return res.json()
 }
 
-export async function createBranch(name: string, description?: string, copyFrom?: string) {
+export async function createBranch(name: string, baseBranch: string, description?: string) {
   const res = await fetch(`${API_BASE}/branches/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description, copyFrom })
+    body: JSON.stringify({ name, baseBranch, description })
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Failed to create branch')
@@ -147,6 +189,17 @@ export async function deleteBranch(name: string) {
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error || 'Failed to delete branch')
+  return data
+}
+
+export async function promoteBranch(sourceBranch: string, targetBranch: string, createSnapshot: boolean = true) {
+  const res = await fetch(`${API_BASE}/branches/promote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceBranch, targetBranch, createSnapshot })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Failed to promote branch')
   return data
 }
 

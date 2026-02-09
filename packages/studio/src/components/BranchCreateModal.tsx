@@ -1,14 +1,19 @@
 'use client'
 
-import { useState } from 'react'
-import { X, Loader } from 'lucide-react'
-import { createBranch } from '@/lib/api'
+import { useState, useEffect } from 'react'
+import { X, Loader, GitBranch } from 'lucide-react'
+import { createBranch, getBranches } from '@/lib/api'
 
 interface BranchCreateModalProps {
   isOpen: boolean
   onClose: () => void
   currentBranch: string
   onSuccess?: () => void
+}
+
+interface Branch {
+  name: string
+  is_current: boolean
 }
 
 export default function BranchCreateModal({
@@ -19,8 +24,31 @@ export default function BranchCreateModal({
 }: BranchCreateModalProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [baseBranch, setBaseBranch] = useState(currentBranch)
+  const [branches, setBranches] = useState<Branch[]>([])
   const [creating, setCreating] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Load available branches when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      loadBranches()
+      setBaseBranch(currentBranch) // Default to current branch
+    }
+  }, [isOpen, currentBranch])
+
+  async function loadBranches() {
+    setLoading(true)
+    try {
+      const data = await getBranches()
+      setBranches(data.branches || [])
+    } catch (err: any) {
+      console.error('Failed to load branches:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   if (!isOpen) return null
 
@@ -36,20 +64,24 @@ export default function BranchCreateModal({
       return
     }
 
+    if (!baseBranch) {
+      setError('Base branch is required')
+      return
+    }
+
     setCreating(true)
     setError(null)
 
     try {
-      await createBranch(name.trim(), description.trim() || undefined)
+      await createBranch(name.trim(), baseBranch, description.trim() || undefined)
 
       // Reset form
       setName('')
       setDescription('')
+      setBaseBranch(currentBranch)
 
       onClose()
       onSuccess?.()
-
-      // Don't reload the page, just refresh data
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -61,6 +93,7 @@ export default function BranchCreateModal({
     if (creating) return
     setName('')
     setDescription('')
+    setBaseBranch(currentBranch)
     setError(null)
     onClose()
   }
@@ -76,7 +109,10 @@ export default function BranchCreateModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold">Create New Branch</h2>
+          <div className="flex items-center gap-2">
+            <GitBranch className="w-5 h-5 text-app-accent" />
+            <h2 className="text-xl font-bold">Create New Branch</h2>
+          </div>
           <button
             onClick={handleClose}
             disabled={creating}
@@ -112,6 +148,32 @@ export default function BranchCreateModal({
             </p>
           </div>
 
+          {/* Base Branch Selection */}
+          <div>
+            <label className="block text-sm text-app-text-dim mb-2">
+              Base Branch <span className="text-red-400">*</span>
+            </label>
+            <select
+              value={baseBranch}
+              onChange={(e) => setBaseBranch(e.target.value)}
+              disabled={creating || loading}
+              className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-sm focus:outline-none focus:border-app-accent cursor-pointer"
+            >
+              {loading ? (
+                <option>Loading branches...</option>
+              ) : (
+                branches.map((branch) => (
+                  <option key={branch.name} value={branch.name}>
+                    {branch.name} {branch.is_current ? '(current)' : ''}
+                  </option>
+                ))
+              )}
+            </select>
+            <p className="text-xs text-app-text-dim mt-1">
+              The branch to copy from
+            </p>
+          </div>
+
           {/* Description */}
           <div>
             <label className="block text-sm text-app-text-dim mb-2">
@@ -127,10 +189,10 @@ export default function BranchCreateModal({
             />
           </div>
 
-          {/* Copy From Info */}
-          <div className="bg-app-bg border border-app-border rounded p-3">
-            <p className="text-xs text-app-text-dim">
-              Will copy database from: <span className="text-app-accent font-medium">{currentBranch}</span>
+          {/* Info Box */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded p-3">
+            <p className="text-xs text-blue-400">
+              ℹ️ This will create a full isolated copy of <span className="font-semibold">{baseBranch}</span>
             </p>
           </div>
 
@@ -152,7 +214,7 @@ export default function BranchCreateModal({
             </button>
             <button
               onClick={handleCreate}
-              disabled={creating || !name.trim()}
+              disabled={creating || !name.trim() || !baseBranch || loading}
               className="px-4 py-2 text-sm bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors flex items-center gap-2"
             >
               {creating ? (

@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Table2, ChevronRight, ChevronDown, Eye, Zap, Code, Copy, CheckCircle, Database as DatabaseIcon } from 'lucide-react'
+import { Table2, ChevronRight, ChevronDown, Eye, Zap, Code, Copy, CheckCircle, Database as DatabaseIcon, Network } from 'lucide-react'
 import { getTables, getTableInfo, executeQuery } from '@/lib/api'
+import ERDiagramPage from './ERDiagramPage'
 
 interface DBObject {
   name: string
@@ -25,6 +26,7 @@ interface Constraint {
 }
 
 export default function DatabasePage() {
+  const [mainView, setMainView] = useState<'tables' | 'er'>('tables')
   const [tables, setTables] = useState<DBObject[]>([])
   const [views, setViews] = useState<DBObject[]>([])
   const [indexes, setIndexes] = useState<DBObject[]>([])
@@ -32,7 +34,7 @@ export default function DatabasePage() {
   const [selectedObject, setSelectedObject] = useState<{ type: string; name: string } | null>(null)
   const [objectDetails, setObjectDetails] = useState<any>(null)
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'columns' | 'constraints' | 'indexes' | 'sql'>('columns')
+  const [activeTab, setActiveTab] = useState<'columns' | 'constraints' | 'indexes' | 'relations' | 'triggers' | 'sql'>('columns')
 
   // Sidebar sections state
   const [tablesCollapsed, setTablesCollapsed] = useState(false)
@@ -110,6 +112,14 @@ export default function DatabasePage() {
         const indexQuery = `SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='${name}' AND name NOT LIKE 'sqlite_%'`
         const indexResult = await executeQuery(indexQuery)
 
+        // Get foreign keys for this table
+        const foreignKeysQuery = `PRAGMA foreign_key_list(${name})`
+        const foreignKeysResult = await executeQuery(foreignKeysQuery)
+
+        // Get triggers for this table
+        const triggersQuery = `SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name='${name}'`
+        const triggersResult = await executeQuery(triggersQuery)
+
         // Get SQL definition
         const sqlQuery = `SELECT sql FROM sqlite_master WHERE type='table' AND name='${name}'`
         const sqlResult = await executeQuery(sqlQuery)
@@ -117,6 +127,8 @@ export default function DatabasePage() {
         setObjectDetails({
           ...info,
           indexes: indexResult.rows || [],
+          foreignKeys: foreignKeysResult.rows || [],
+          triggers: triggersResult.rows || [],
           sql: sqlResult.rows?.[0]?.sql || ''
         })
       } else if (type === 'view' || type === 'index' || type === 'trigger') {
@@ -151,13 +163,55 @@ export default function DatabasePage() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col h-full">
+      {/* Main View Tabs */}
+      <div className="bg-app-sidebar border-b border-app-border px-6 py-3 flex items-center gap-1">
+        <button
+          onClick={() => setMainView('tables')}
+          className={`
+            px-4 py-2 rounded text-sm font-medium transition-colors flex items-center gap-2
+            ${mainView === 'tables'
+              ? 'bg-app-accent text-white'
+              : 'text-app-text-dim hover:text-app-text hover:bg-app-sidebar-hover'
+            }
+          `}
+        >
+          <Table2 className="w-4 h-4" />
+          Tables
+        </button>
+        <button
+          onClick={() => setMainView('er')}
+          className={`
+            px-4 py-2 rounded text-sm font-medium transition-colors flex items-center gap-2
+            ${mainView === 'er'
+              ? 'bg-app-accent text-white'
+              : 'text-app-text-dim hover:text-app-text hover:bg-app-sidebar-hover'
+            }
+          `}
+        >
+          <Network className="w-4 h-4" />
+          ER Diagram
+        </button>
+      </div>
+
+      {/* Main Content */}
+      {mainView === 'er' ? (
+        <ERDiagramPage />
+      ) : (
+        <div className="flex h-full flex-1 overflow-hidden">{renderTablesView()}</div>
+      )}
+    </div>
+  )
+
+  function renderTablesView() {
+    return (
+      <>
       {/* Left Sidebar - Database Objects Navigator */}
       <div className="w-64 bg-app-sidebar border-r border-app-border overflow-y-auto flex-shrink-0">
         <div className="p-4">
           <div className="flex items-center gap-2 mb-4">
             <DatabaseIcon className="w-5 h-5 text-app-accent" />
-            <h2 className="text-lg font-semibold">Schema</h2>
+            <h2 className="text-lg font-semibold">Objects</h2>
           </div>
 
           {/* Tables Section */}
@@ -336,7 +390,7 @@ export default function DatabasePage() {
               <>
                 <div className="px-6 py-2 border-b border-app-border bg-app-sidebar/20 flex-shrink-0">
                   <div className="flex gap-4">
-                    {(['columns', 'constraints', 'indexes', 'sql'] as const).map((tab) => (
+                    {(['columns', 'constraints', 'indexes', 'relations', 'triggers', 'sql'] as const).map((tab) => (
                       <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
@@ -450,6 +504,80 @@ export default function DatabasePage() {
                     </div>
                   )}
 
+                  {activeTab === 'relations' && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-app-text-dim mb-3 uppercase tracking-wide">Foreign Key Relations</h3>
+                      {objectDetails?.foreignKeys && objectDetails.foreignKeys.length > 0 ? (
+                        <div className="space-y-3">
+                          {objectDetails.foreignKeys.map((fk: any, i: number) => (
+                            <div key={i} className="bg-app-sidebar border border-app-border rounded p-4">
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-400 rounded text-xs font-medium">
+                                  FOREIGN KEY
+                                </span>
+                              </div>
+                              <div className="space-y-2 text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-app-text-dim">Column:</span>
+                                  <code className="text-app-text font-mono bg-app-bg px-2 py-0.5 rounded">
+                                    {fk.from}
+                                  </code>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-app-text-dim">References:</span>
+                                  <code className="text-app-text font-mono bg-app-bg px-2 py-0.5 rounded">
+                                    {fk.table}.{fk.to}
+                                  </code>
+                                </div>
+                                {fk.on_update && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-app-text-dim">On Update:</span>
+                                    <span className="text-yellow-400">{fk.on_update}</span>
+                                  </div>
+                                )}
+                                {fk.on_delete && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-app-text-dim">On Delete:</span>
+                                    <span className="text-red-400">{fk.on_delete}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-app-text-dim italic">No foreign key relations defined</p>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'triggers' && (
+                    <div>
+                      <h3 className="text-sm font-semibold text-app-text-dim mb-3 uppercase tracking-wide">Triggers</h3>
+                      {objectDetails?.triggers && objectDetails.triggers.length > 0 ? (
+                        <div className="space-y-3">
+                          {objectDetails.triggers.map((trigger: any, i: number) => (
+                            <div key={i} className="bg-app-sidebar border border-app-border rounded p-4">
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="font-mono text-sm text-app-text">{trigger.name}</span>
+                                <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded text-xs font-medium">
+                                  TRIGGER
+                                </span>
+                              </div>
+                              {trigger.sql && (
+                                <pre className="text-xs bg-app-bg border border-app-border rounded p-3 overflow-x-auto font-mono">
+                                  {trigger.sql}
+                                </pre>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-app-text-dim italic">No triggers defined</p>
+                      )}
+                    </div>
+                  )}
+
                   {activeTab === 'sql' && (
                     <div>
                       <div className="flex items-center justify-between mb-3">
@@ -498,6 +626,7 @@ export default function DatabasePage() {
           </div>
         )}
       </div>
-    </div>
-  )
+      </>
+    )
+  }
 }

@@ -299,8 +299,35 @@ function EventSummary({ event }: { event: TimelineEvent }) {
     case 'branch_created':
       return (
         <div className="text-sm text-app-text-dim">
-          Created <span className="font-mono text-app-accent">{data.name}</span>
-          {data.copyFrom && <span> from {data.copyFrom}</span>}
+          Created from <span className="font-mono text-app-accent">{data.base_branch}</span>
+        </div>
+      )
+
+    case 'branch_created_from_here':
+      return (
+        <div className="text-sm text-app-text-dim">
+          Branch <span className="font-mono text-app-accent">{data.new_branch}</span> created from this branch
+        </div>
+      )
+
+    case 'branch_deleted':
+      return (
+        <div className="text-sm text-app-text-dim">
+          Deleted <span className="font-mono text-red-400">{data.branch}</span>
+        </div>
+      )
+
+    case 'branch_promoted':
+      return (
+        <div className="text-sm text-app-text-dim">
+          Promoted from <span className="font-mono text-app-accent">{data.source}</span>
+        </div>
+      )
+
+    case 'branch_promoted_from_here':
+      return (
+        <div className="text-sm text-app-text-dim">
+          Promoted to <span className="font-mono text-app-accent">{data.target}</span>
         </div>
       )
 
@@ -399,9 +426,56 @@ function EventDetails({ event }: { event: TimelineEvent }) {
       return (
         <div className="space-y-2">
           <div className="text-xs text-app-text-dim space-y-1">
-            <div>Branch: <span className="font-mono text-app-accent">{data.name}</span></div>
-            {data.copyFrom && <div>Copied from: {data.copyFrom}</div>}
-            {data.description && <div>Description: {data.description}</div>}
+            <div>Base Branch: <span className="font-mono text-app-accent">{data.base_branch}</span></div>
+            <div>Created: {new Date(data.created_at).toLocaleString()}</div>
+          </div>
+          <div className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/30 rounded p-2">
+            ℹ️ This branch is a full isolated copy of {data.base_branch}
+          </div>
+        </div>
+      )
+
+    case 'branch_created_from_here':
+      return (
+        <div className="space-y-2">
+          <div className="text-xs text-app-text-dim space-y-1">
+            <div>New Branch: <span className="font-mono text-app-accent">{data.new_branch}</span></div>
+            <div>Created: {new Date(data.created_at).toLocaleString()}</div>
+          </div>
+        </div>
+      )
+
+    case 'branch_deleted':
+      return (
+        <div className="text-xs text-app-text-dim">
+          Branch <span className="font-mono text-red-400">{data.branch}</span> was deleted
+        </div>
+      )
+
+    case 'branch_promoted':
+      return (
+        <div className="space-y-2">
+          <div className="text-xs text-app-text-dim space-y-1">
+            <div>Source: <span className="font-mono text-app-accent">{data.source}</span></div>
+            <div>Target: <span className="font-mono text-app-accent">{data.target}</span></div>
+            <div>Promoted: {new Date(data.promoted_at).toLocaleString()}</div>
+            {data.snapshot_id && <div>Snapshot ID: {data.snapshot_id}</div>}
+          </div>
+          <div className="text-xs text-green-400 bg-green-500/10 border border-green-500/30 rounded p-2">
+            ✓ This branch state was replaced with {data.source}
+          </div>
+        </div>
+      )
+
+    case 'branch_promoted_from_here':
+      return (
+        <div className="space-y-2">
+          <div className="text-xs text-app-text-dim space-y-1">
+            <div>Target: <span className="font-mono text-app-accent">{data.target}</span></div>
+            <div>Promoted: {new Date(data.promoted_at).toLocaleString()}</div>
+          </div>
+          <div className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/30 rounded p-2">
+            ℹ️ This branch state was promoted to {data.target}
           </div>
         </div>
       )
@@ -445,7 +519,11 @@ function getEventIcon(type: string) {
     case 'migration_failed':
       return <Clock className="w-5 h-5" />
     case 'branch_created':
+    case 'branch_created_from_here':
+    case 'branch_deleted':
     case 'branch_switched':
+    case 'branch_promoted':
+    case 'branch_promoted_from_here':
       return <GitBranch className="w-5 h-5" />
     default:
       return <AlertCircle className="w-5 h-5" />
@@ -470,8 +548,15 @@ function getEventColor(type: string) {
     case 'migration_created':
       return 'bg-yellow-500/20 text-yellow-400'
     case 'branch_created':
-    case 'branch_switched':
+    case 'branch_created_from_here':
       return 'bg-cyan-500/20 text-cyan-400'
+    case 'branch_promoted':
+    case 'branch_promoted_from_here':
+      return 'bg-green-500/20 text-green-400'
+    case 'branch_switched':
+      return 'bg-indigo-500/20 text-indigo-400'
+    case 'branch_deleted':
+      return 'bg-red-500/20 text-red-400'
     default:
       return 'bg-gray-500/20 text-gray-400'
   }
@@ -486,5 +571,6 @@ function formatEventType(type: string): string {
 function shouldShowDetails(type: string): boolean {
   // Events that have expandable details
   return ['sql_executed', 'sql_error', 'migration_applied', 'migration_created', 'migration_failed',
-    'snapshot_created', 'snapshot_restored', 'branch_created', 'table_created'].includes(type)
+    'snapshot_created', 'snapshot_restored', 'branch_created', 'branch_created_from_here', 
+    'branch_deleted', 'branch_promoted', 'branch_promoted_from_here', 'table_created'].includes(type)
 }

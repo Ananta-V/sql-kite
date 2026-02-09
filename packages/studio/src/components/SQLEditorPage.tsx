@@ -29,22 +29,11 @@ interface ErrorDetails {
   location?: { line: number; column: number }
 }
 
-interface ExplainPlan {
-  raw: string
-  parsed: {
-    scanType: string
-    indexUsed?: string
-    tableName?: string
-    detail: string
-  }[]
-}
-
 export default function SQLEditorPage() {
   const { editorState, updateSQL, updateActiveTab, addFavorite } = useAppContext()
   const [result, setResult] = useState<ExecutionResult | null>(null)
   const [error, setError] = useState<ErrorDetails | null>(null)
   const [errorHistory, setErrorHistory] = useState<Array<{ sql: string; error: ErrorDetails; timestamp: number }>>([])
-  const [explainPlan, setExplainPlan] = useState<ExplainPlan | null>(null)
   const [loading, setLoading] = useState(false)
   const [showMigrationModal, setShowMigrationModal] = useState(false)
   const [migrationName, setMigrationName] = useState('')
@@ -183,7 +172,6 @@ export default function SQLEditorPage() {
     setLoading(true)
     setError(null)
     setResult(null)
-    setExplainPlan(null)
     updateActiveTab('result')
 
     const startTime = performance.now()
@@ -227,31 +215,6 @@ export default function SQLEditorPage() {
     }
   }
 
-  async function handleExplain() {
-    const queryToRun = editorState.sql.trim()
-    if (!queryToRun) return
-
-    setLoading(true)
-    updateActiveTab('explain')
-
-    try {
-      const explainQuery = `EXPLAIN QUERY PLAN ${queryToRun}`
-      const data = await executeQuery(explainQuery)
-
-      // Parse explain output
-      const parsed = parseExplainPlan(data.rows || [])
-      setExplainPlan({
-        raw: JSON.stringify(data.rows, null, 2),
-        parsed
-      })
-    } catch (err: any) {
-      setError({ message: err.message })
-      updateActiveTab('errors')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   function detectQueryType(sql: string): string {
     const upper = sql.trim().toUpperCase()
     if (upper.startsWith('SELECT')) return 'SELECT'
@@ -262,49 +225,6 @@ export default function SQLEditorPage() {
     if (upper.startsWith('ALTER')) return 'ALTER'
     if (upper.startsWith('DROP')) return 'DROP'
     return 'UNKNOWN'
-  }
-
-  function parseExplainPlan(rows: any[]): ExplainPlan['parsed'] {
-    return rows.map(row => {
-      const detail = row.detail || ''
-      let scanType = 'UNKNOWN'
-      let indexUsed = undefined
-      let tableName = undefined
-
-      if (detail.includes('SCAN TABLE')) {
-        scanType = 'TABLE_SCAN'
-        const tableMatch = detail.match(/SCAN TABLE (\w+)/)
-        if (tableMatch) tableName = tableMatch[1]
-      }
-
-      if (detail.includes('USING INDEX')) {
-        scanType = 'INDEX_SCAN'
-        const indexMatch = detail.match(/USING INDEX (\w+)/)
-        if (indexMatch) indexUsed = indexMatch[1]
-      }
-
-      if (detail.includes('SEARCH TABLE')) {
-        scanType = 'INDEX_SEARCH'
-        const tableMatch = detail.match(/SEARCH TABLE (\w+)/)
-        if (tableMatch) tableName = tableMatch[1]
-      }
-
-      return {
-        scanType,
-        indexUsed,
-        tableName,
-        detail
-      }
-    })
-  }
-
-  function getPerformanceHint(plan: ExplainPlan['parsed']): string | null {
-    for (const step of plan) {
-      if (step.scanType === 'TABLE_SCAN' && !step.detail.includes('PRIMARY KEY')) {
-        return `Full table scan detected on "${step.tableName}". Consider adding an index to improve performance.`
-      }
-    }
-    return null
   }
 
   function getSuggestedTable(error: string): string | null {
@@ -556,7 +476,7 @@ export default function SQLEditorPage() {
           {/* Tabs + Actions */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-app-panel-border bg-app-sidebar/30 flex-shrink-0">
             <div className="flex gap-4">
-              {(['result', 'errors', 'explain', 'info'] as const).map((tab) => (
+              {(['result', 'errors', 'info'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => updateActiveTab(tab)}
@@ -800,98 +720,6 @@ export default function SQLEditorPage() {
                   <div className="text-center py-8">
                     <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2 opacity-50" />
                     <div className="text-app-text-dim text-sm">No errors</div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {editorState.activeTab === 'explain' && (
-              <div>
-                {explainPlan ? (
-                  <div className="space-y-4">
-                    {/* Visual Plan */}
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold flex items-center gap-2">
-                          <Zap className="w-4 h-4 text-amber-400" />
-                          Query Execution Plan
-                        </h3>
-                      </div>
-
-                      <div className="space-y-2">
-                        {explainPlan.parsed.map((step, i) => (
-                          <div key={i} className="bg-app-sidebar border border-app-border rounded p-3">
-                            <div className="flex items-start gap-3">
-                              <div className="text-app-text-dim text-xs">#{i + 1}</div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  {step.scanType === 'INDEX_SCAN' || step.scanType === 'INDEX_SEARCH' ? (
-                                    <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium">
-                                      ⚡ INDEX
-                                    </span>
-                                  ) : step.scanType === 'TABLE_SCAN' ? (
-                                    <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs font-medium">
-                                      📄 SCAN
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 bg-app-border text-app-text-dim rounded text-xs font-medium">
-                                      {step.scanType}
-                                    </span>
-                                  )}
-                                  {step.tableName && (
-                                    <span className="text-xs text-app-text">Table: {step.tableName}</span>
-                                  )}
-                                  {step.indexUsed && (
-                                    <span className="text-xs text-green-400">Using: {step.indexUsed}</span>
-                                  )}
-                                </div>
-                                <pre className="text-xs text-app-text-dim font-mono mt-1">
-                                  {step.detail}
-                                </pre>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Performance Hint */}
-                    {getPerformanceHint(explainPlan.parsed) && (
-                      <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
-                        <div className="flex items-start gap-3">
-                          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <h4 className="text-amber-400 font-semibold text-sm mb-1">Performance Suggestion</h4>
-                            <p className="text-xs text-app-text-dim">
-                              {getPerformanceHint(explainPlan.parsed)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Raw Output */}
-                    <details className="bg-app-sidebar border border-app-border rounded">
-                      <summary className="px-3 py-2 text-xs cursor-pointer hover:bg-app-sidebar-hover">
-                        Raw Explain Output
-                      </summary>
-                      <pre className="px-3 py-2 text-xs text-app-text-dim font-mono border-t border-app-border overflow-x-auto">
-                        {explainPlan.raw}
-                      </pre>
-                    </details>
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <button
-                      onClick={handleExplain}
-                      disabled={loading || !editorState.sql.trim()}
-                      className="px-4 py-2 text-sm bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors font-medium"
-                    >
-                      {loading ? 'Analyzing...' : 'Run EXPLAIN QUERY PLAN'}
-                    </button>
-                    <p className="text-xs text-app-text-dim mt-3">
-                      Analyze how SQLite will execute your query
-                    </p>
                   </div>
                 )}
               </div>

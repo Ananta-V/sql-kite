@@ -9,11 +9,12 @@ import SQLEditorPage from '@/components/SQLEditorPage'
 import TimelinePage from '@/components/TimelinePage'
 import SnapshotsPage from '@/components/SnapshotsPage'
 import MigrationsPage from '@/components/MigrationsPage'
+import BranchesPage from '@/components/BranchesPage'
 import BranchCreateModal from '@/components/BranchCreateModal'
 import { AppProvider, useAppContext } from '@/contexts/AppContext'
 import { getProjectInfo } from '@/lib/api'
 
-type Page = 'home' | 'sql' | 'database' | 'migrations' | 'snapshots' | 'timeline' | 'settings'
+type Page = 'home' | 'sql' | 'database' | 'branches' | 'migrations' | 'snapshots' | 'timeline' | 'settings'
 
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('home')
@@ -61,6 +62,13 @@ function AppContent() {
           {currentPage === 'home' && <HomePage projectInfo={projectInfo} />}
           {currentPage === 'sql' && <SQLEditorPage />}
           {currentPage === 'database' && <DatabasePage />}
+          {currentPage === 'branches' && (
+            <BranchesPage 
+              currentBranch={projectInfo?.currentBranch || 'main'}
+              onBranchChange={handleBranchChange}
+              onCreateClick={handleCreateBranch}
+            />
+          )}
           {currentPage === 'migrations' && <MigrationsPage />}
           {currentPage === 'timeline' && <TimelinePage />}
           {currentPage === 'snapshots' && <SnapshotsPage />}

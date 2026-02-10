@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Play, Save, Star, ChevronDown, Camera, Copy, AlertCircle, Info, Zap, FileText, Download, Database, CheckCircle } from 'lucide-react'
+import { Save, Star, ChevronDown, Camera, Copy, AlertCircle, Info, FileText, Download, Database, CheckCircle, Lock, ArrowLeftRight, GitBranch, Eye, List, Terminal } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import InnerSidebar from './InnerSidebar'
-import { executeQuery, getTables, getTableInfo, createMigration, createSnapshot } from '@/lib/api'
+import { executeQuery, executeCompareQuery, checkpointCompareBranches, closeCompareBranches, getBranches, getTables, getTableInfo, createMigration, createSnapshot } from '@/lib/api'
 import { useAppContext } from '@/contexts/AppContext'
 import {
   SQLCompletionProvider,
@@ -29,8 +29,45 @@ interface ErrorDetails {
   location?: { line: number; column: number }
 }
 
-export default function SQLEditorPage() {
-  const { editorState, updateSQL, updateActiveTab, addFavorite } = useAppContext()
+interface CompareSchemaItem {
+  type: string
+  name: string
+  sql: string
+}
+
+interface CompareColumnInfo {
+  name: string
+  type: string
+  notnull: number
+  dflt_value: any
+  pk: number
+}
+
+interface CompareTableChange {
+  table: string
+  addedColumns: CompareColumnInfo[]
+  removedColumns: CompareColumnInfo[]
+  modifiedColumns: Array<{ name: string; fromType: string; toType: string }>
+  rowCounts?: { a: number; b: number }
+}
+
+interface CompareChanges {
+  addedTables: CompareSchemaItem[]
+  removedTables: CompareSchemaItem[]
+  addedIndexes: CompareSchemaItem[]
+  removedIndexes: CompareSchemaItem[]
+  addedTriggers: CompareSchemaItem[]
+  removedTriggers: CompareSchemaItem[]
+  tableChanges: CompareTableChange[]
+}
+
+interface SQLEditorPageProps {
+  compareMode?: boolean
+  onCompareModeChange?: (next: boolean) => void
+}
+
+export default function SQLEditorPage({ compareMode = false, onCompareModeChange }: SQLEditorPageProps) {
+  const { editorState, updateSQL, updateActiveTab, addFavorite, projectInfo } = useAppContext()
   const [result, setResult] = useState<ExecutionResult | null>(null)
   const [error, setError] = useState<ErrorDetails | null>(null)
   const [errorHistory, setErrorHistory] = useState<Array<{ sql: string; error: ErrorDetails; timestamp: number }>>([])
@@ -47,6 +84,20 @@ export default function SQLEditorPage() {
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [lastQueryType, setLastQueryType] = useState<string>('unknown')
   const [lastExecutedSQL, setLastExecutedSQL] = useState<string>('')
+  const [compareEnabled, setCompareEnabled] = useState(compareMode)
+  const [compareTab, setCompareTab] = useState<'change' | 'preview' | 'manual'>('change')
+  const [compareBranches, setCompareBranches] = useState<{ a: string; b: string }>({ a: '', b: '' })
+  const [compareBranchOptions, setCompareBranchOptions] = useState<string[]>([])
+  const [compareErrorMessage, setCompareErrorMessage] = useState<string | null>(null)
+  const [compareLoading, setCompareLoading] = useState(false)
+  const [compareChanges, setCompareChanges] = useState<CompareChanges | null>(null)
+  const [compareSqlPreview, setCompareSqlPreview] = useState('')
+  const [compareSqlA, setCompareSqlA] = useState('SELECT * FROM sqlite_master;')
+  const [compareSqlB, setCompareSqlB] = useState('SELECT * FROM sqlite_master;')
+  const [compareActiveTerminal, setCompareActiveTerminal] = useState<'a' | 'b'>('a')
+  const [compareResults, setCompareResults] = useState<{ a: ExecutionResult | null; b: ExecutionResult | null }>({ a: null, b: null })
+  const [compareErrors, setCompareErrors] = useState<{ a: ErrorDetails | null; b: ErrorDetails | null }>({ a: null, b: null })
+  const [compareQueryTypes, setCompareQueryTypes] = useState<{ a: string; b: string }>({ a: 'SELECT', b: 'SELECT' })
   const exportMenuRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const isResizingRef = useRef(false)
@@ -61,6 +112,65 @@ export default function SQLEditorPage() {
   useEffect(() => {
     loadSchemaForAutocomplete()
   }, [])
+
+  useEffect(() => {
+    setCompareEnabled(compareMode)
+  }, [compareMode])
+
+  useEffect(() => {
+    onCompareModeChange?.(compareEnabled)
+  }, [compareEnabled, onCompareModeChange])
+
+  useEffect(() => {
+    if (!compareEnabled) {
+      setCompareTab('change')
+      setCompareChanges(null)
+      setCompareSqlPreview('')
+      setCompareErrors({ a: null, b: null })
+      setCompareResults({ a: null, b: null })
+      setCompareErrorMessage(null)
+      setShowExportMenu(false)
+      if (compareBranches.a && compareBranches.b) {
+        closeCompareBranches([compareBranches.a, compareBranches.b]).catch(() => null)
+      }
+      return
+    }
+
+    setShowExportMenu(false)
+    loadCompareBranches()
+  }, [compareEnabled])
+
+  useEffect(() => {
+    if (!compareEnabled) return
+    if (!compareBranches.a || !compareBranches.b || compareBranches.a === compareBranches.b) return
+
+    checkpointCompareBranches([compareBranches.a, compareBranches.b]).catch(() => null)
+  }, [compareEnabled, compareBranches])
+
+  useEffect(() => {
+    if (!compareEnabled) return
+    if (compareTab !== 'change') return
+    if (!compareBranches.a || !compareBranches.b || compareBranches.a === compareBranches.b) return
+
+    loadCompareChanges()
+  }, [compareEnabled, compareTab, compareBranches])
+
+  useEffect(() => {
+    if (!compareEnabled) return
+    if (!compareBranches.a || !compareBranches.b) return
+    if (compareBranches.a === compareBranches.b) return
+
+    const preview = buildSqlPreview(compareChanges)
+    setCompareSqlPreview(preview)
+  }, [compareEnabled, compareBranches, compareChanges])
+
+  useEffect(() => {
+    return () => {
+      if (compareEnabled && compareBranches.a && compareBranches.b) {
+        closeCompareBranches([compareBranches.a, compareBranches.b]).catch(() => null)
+      }
+    }
+  }, [compareEnabled, compareBranches])
 
   // Close export menu when clicking outside
   useEffect(() => {
@@ -134,6 +244,327 @@ export default function SQLEditorPage() {
     } catch (error) {
       console.error('Failed to load schema for autocomplete:', error)
     }
+  }
+
+  async function loadCompareBranches() {
+    try {
+      const data = await getBranches()
+      const branchNames = (data.branches || []).map((branch: any) => branch.name)
+      setCompareBranchOptions(branchNames)
+
+      const current = projectInfo?.currentBranch || data.current || branchNames[0] || ''
+      const branchA = current
+      const branchB = branchNames.find((name: string) => name !== branchA) || ''
+
+      setCompareBranches({ a: branchA, b: branchB })
+
+      if (!branchA || !branchB || branchA === branchB) {
+        setCompareErrorMessage('Select two different branches to compare')
+      } else {
+        setCompareErrorMessage(null)
+      }
+    } catch (error) {
+      console.error('Failed to load branches for compare mode:', error)
+      setCompareErrorMessage('Failed to load branches for compare')
+    }
+  }
+
+  function normalizeColumnType(type: string) {
+    return (type || '').trim().toUpperCase()
+  }
+
+  function buildSqlPreview(changes: CompareChanges | null) {
+    if (!changes) return ''
+
+    const lines: string[] = []
+
+    changes.addedTables.forEach((table) => {
+      lines.push(table.sql.endsWith(';') ? table.sql : `${table.sql};`)
+    })
+
+    changes.removedTables.forEach((table) => {
+      lines.push(`DROP TABLE IF EXISTS "${table.name}";`)
+    })
+
+    changes.addedIndexes.forEach((index) => {
+      lines.push(index.sql.endsWith(';') ? index.sql : `${index.sql};`)
+    })
+
+    changes.removedIndexes.forEach((index) => {
+      lines.push(`DROP INDEX IF EXISTS "${index.name}";`)
+    })
+
+    changes.addedTriggers.forEach((trigger) => {
+      lines.push(trigger.sql.endsWith(';') ? trigger.sql : `${trigger.sql};`)
+    })
+
+    changes.removedTriggers.forEach((trigger) => {
+      lines.push(`DROP TRIGGER IF EXISTS "${trigger.name}";`)
+    })
+
+    changes.tableChanges.forEach((change) => {
+      change.addedColumns.forEach((column) => {
+        lines.push(`ALTER TABLE "${change.table}" ADD COLUMN "${column.name}" ${column.type};`)
+      })
+
+      change.removedColumns.forEach((column) => {
+        lines.push(`-- Column removed: ${change.table}.${column.name}`)
+      })
+
+      change.modifiedColumns.forEach((column) => {
+        lines.push(`-- Column modified: ${change.table}.${column.name} ${column.fromType} -> ${column.toType}`)
+      })
+    })
+
+    return lines.join('\n')
+  }
+
+  async function loadCompareChanges() {
+    if (compareBranches.a === compareBranches.b) {
+      setCompareErrorMessage('Select two different branches to compare')
+      return
+    }
+
+    setCompareLoading(true)
+    setCompareErrorMessage(null)
+
+    try {
+      const baseSql = `
+        SELECT type, name, sql
+        FROM sqlite_master
+        WHERE sql NOT NULL
+          AND name NOT LIKE 'sqlite_%'
+          AND name NOT LIKE '_studio_%'
+        ORDER BY type, name
+      `
+
+      const [schemaA, schemaB] = await Promise.all([
+        executeCompareQuery(compareBranches.a, baseSql),
+        executeCompareQuery(compareBranches.b, baseSql)
+      ])
+
+      const rowsA = (schemaA.rows || []) as CompareSchemaItem[]
+      const rowsB = (schemaB.rows || []) as CompareSchemaItem[]
+
+      const byType = (rows: CompareSchemaItem[], type: string) => rows.filter(row => row.type === type)
+
+      const tablesA = byType(rowsA, 'table')
+      const tablesB = byType(rowsB, 'table')
+      const indexesA = byType(rowsA, 'index')
+      const indexesB = byType(rowsB, 'index')
+      const triggersA = byType(rowsA, 'trigger')
+      const triggersB = byType(rowsB, 'trigger')
+
+      const tableNamesA = new Set(tablesA.map(item => item.name))
+      const tableNamesB = new Set(tablesB.map(item => item.name))
+      const commonTables = tablesA
+        .map(item => item.name)
+        .filter(name => tableNamesB.has(name))
+
+      const fetchTableInfoMap = async (branch: string, tables: string[]) => {
+        const entries = await Promise.all(tables.map(async (name) => {
+          const info = await executeCompareQuery(branch, `PRAGMA table_info(\"${name}\")`)
+          return [name, info.rows as CompareColumnInfo[]] as const
+        }))
+        return new Map(entries)
+      }
+
+      const fetchRowCounts = async (branch: string, tables: string[]) => {
+        const entries = await Promise.all(tables.map(async (name) => {
+          const info = await executeCompareQuery(branch, `SELECT COUNT(*) as count FROM \"${name}\"`)
+          const count = info.rows?.[0]?.count ?? 0
+          return [name, Number(count)] as const
+        }))
+        return new Map(entries)
+      }
+
+      const [tableInfoA, tableInfoB, rowCountsA, rowCountsB] = await Promise.all([
+        fetchTableInfoMap(compareBranches.a, commonTables),
+        fetchTableInfoMap(compareBranches.b, commonTables),
+        fetchRowCounts(compareBranches.a, commonTables),
+        fetchRowCounts(compareBranches.b, commonTables)
+      ])
+
+      const tableChanges: CompareTableChange[] = []
+
+      commonTables.forEach((table) => {
+        const colsA = tableInfoA.get(table) || []
+        const colsB = tableInfoB.get(table) || []
+
+        const mapA = new Map(colsA.map(col => [col.name, col]))
+        const mapB = new Map(colsB.map(col => [col.name, col]))
+
+        const addedColumns = colsB.filter(col => !mapA.has(col.name))
+        const removedColumns = colsA.filter(col => !mapB.has(col.name))
+        const modifiedColumns: Array<{ name: string; fromType: string; toType: string }> = []
+
+        colsA.forEach((col) => {
+          const match = mapB.get(col.name)
+          if (!match) return
+          const fromType = normalizeColumnType(col.type)
+          const toType = normalizeColumnType(match.type)
+          if (fromType !== toType) {
+            modifiedColumns.push({ name: col.name, fromType, toType })
+          }
+        })
+
+        const countA = rowCountsA.get(table) ?? 0
+        const countB = rowCountsB.get(table) ?? 0
+        const hasRowDiff = countA !== countB
+
+        if (addedColumns.length || removedColumns.length || modifiedColumns.length || hasRowDiff) {
+          tableChanges.push({
+            table,
+            addedColumns,
+            removedColumns,
+            modifiedColumns,
+            rowCounts: { a: countA, b: countB }
+          })
+        }
+      })
+
+      const onlyInA = (rows: CompareSchemaItem[], namesB: Set<string>) => rows.filter(row => !namesB.has(row.name))
+      const onlyInB = (rows: CompareSchemaItem[], namesA: Set<string>) => rows.filter(row => !namesA.has(row.name))
+
+      const indexNamesA = new Set(indexesA.map(item => item.name))
+      const indexNamesB = new Set(indexesB.map(item => item.name))
+      const triggerNamesA = new Set(triggersA.map(item => item.name))
+      const triggerNamesB = new Set(triggersB.map(item => item.name))
+
+      const changes: CompareChanges = {
+        addedTables: onlyInB(tablesB, tableNamesA),
+        removedTables: onlyInA(tablesA, tableNamesB),
+        addedIndexes: onlyInB(indexesB, indexNamesA),
+        removedIndexes: onlyInA(indexesA, indexNamesB),
+        addedTriggers: onlyInB(triggersB, triggerNamesA),
+        removedTriggers: onlyInA(triggersA, triggerNamesB),
+        tableChanges
+      }
+
+      setCompareChanges(changes)
+    } catch (error: any) {
+      console.error('Failed to load compare changes:', error)
+      setCompareErrorMessage(error.message || 'Failed to load compare changes')
+      setCompareChanges(null)
+    } finally {
+      setCompareLoading(false)
+    }
+  }
+
+  function hasForbiddenCompareSql(sql: string) {
+    return /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE|ATTACH)\b/i.test(sql)
+  }
+
+  function getCompareSqlForTerminal(target: 'a' | 'b') {
+    return target === 'a' ? compareSqlA : compareSqlB
+  }
+
+  function setCompareSqlForTerminal(target: 'a' | 'b', value: string) {
+    if (target === 'a') {
+      setCompareSqlA(value)
+    } else {
+      setCompareSqlB(value)
+    }
+  }
+
+  function handleCompareBranchChange(target: 'a' | 'b', value: string) {
+    setCompareBranches(prev => {
+      const next = { ...prev, [target]: value }
+      if (!next.a || !next.b || next.a === next.b) {
+        setCompareErrorMessage('Select two different branches to compare')
+      } else {
+        setCompareErrorMessage(null)
+      }
+      setCompareChanges(null)
+      setCompareResults({ a: null, b: null })
+      setCompareErrors({ a: null, b: null })
+      return next
+    })
+  }
+
+  function handleToggleCompareMode() {
+    if (compareEnabled) {
+      if (compareBranches.a && compareBranches.b) {
+        closeCompareBranches([compareBranches.a, compareBranches.b]).catch(() => null)
+      }
+      setCompareEnabled(false)
+    } else {
+      setCompareEnabled(true)
+    }
+  }
+
+  async function handleCompareExecuteSingle(target: 'a' | 'b') {
+    const sql = getCompareSqlForTerminal(target)
+    const branch = target === 'a' ? compareBranches.a : compareBranches.b
+
+    if (!sql.trim()) return { skipped: true }
+    if (!branch) return { skipped: true }
+
+    if (hasForbiddenCompareSql(sql)) {
+      return { error: { message: 'Write operations are disabled in Compare Mode' }, target }
+    }
+
+    const startTime = performance.now()
+
+    try {
+      const data = await executeCompareQuery(branch, sql)
+      const executionTime = Math.round(performance.now() - startTime)
+      const queryType = detectQueryType(sql)
+
+      return { success: true, target, data, executionTime, queryType }
+    } catch (err: any) {
+      return { error: { message: err.message }, target }
+    }
+  }
+
+  async function handleCompareExecuteBoth() {
+    if (!compareBranchesValid) return
+
+    setLoading(true)
+    setCompareErrors({ a: null, b: null })
+    setCompareResults({ a: null, b: null })
+    updateActiveTab('result')
+
+    const [resultA, resultB] = await Promise.all([
+      handleCompareExecuteSingle('a'),
+      handleCompareExecuteSingle('b')
+    ])
+
+    let hasErrors = false
+
+    // Process result A
+    if (resultA && !('skipped' in resultA)) {
+      if ('error' in resultA && resultA.error) {
+        setCompareErrors(prev => ({ ...prev, a: resultA.error as ErrorDetails }))
+        hasErrors = true
+      } else if ('success' in resultA && resultA.success) {
+        setCompareQueryTypes(prev => ({ ...prev, a: resultA.queryType || 'SELECT' }))
+        setCompareResults(prev => ({
+          ...prev,
+          a: { ...resultA.data, executionTime: resultA.executionTime }
+        }))
+      }
+    }
+
+    // Process result B
+    if (resultB && !('skipped' in resultB)) {
+      if ('error' in resultB && resultB.error) {
+        setCompareErrors(prev => ({ ...prev, b: resultB.error as ErrorDetails }))
+        hasErrors = true
+      } else if ('success' in resultB && resultB.success) {
+        setCompareQueryTypes(prev => ({ ...prev, b: resultB.queryType || 'SELECT' }))
+        setCompareResults(prev => ({
+          ...prev,
+          b: { ...resultB.data, executionTime: resultB.executionTime }
+        }))
+      }
+    }
+
+    if (hasErrors) {
+      updateActiveTab('errors')
+    }
+
+    setLoading(false)
   }
 
   function handleEditorDidMount(editor: any, monaco: any) {
@@ -432,76 +863,505 @@ export default function SQLEditorPage() {
     URL.revokeObjectURL(url)
   }
 
+  const compareDisabledTitle = 'Disabled in Compare Mode'
+  const compareBranchesValid = !!compareBranches.a && !!compareBranches.b && compareBranches.a !== compareBranches.b
+  const canRunCompare = compareEnabled && compareTab === 'manual' && compareBranchesValid
+
+  function renderRowsTable(rows: any[]) {
+    if (rows.length === 0) {
+      return (
+        <div className="text-app-text-dim text-center py-6 text-sm">
+          No rows returned
+        </div>
+      )
+    }
+
+    return (
+      <div className="border border-app-panel-border rounded overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-app-sidebar-active">
+            <tr>
+              {Object.keys(rows[0]).map((key) => (
+                <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                  {key}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row: any, i: number) => (
+              <tr key={i} className="border-t border-app-panel-border hover:bg-app-sidebar-hover">
+                {Object.values(row).map((value: any, j: number) => (
+                  <td key={j} className="px-3 py-2 font-mono">
+                    {value === null ? (
+                      <span className="text-app-text-dim italic">NULL</span>
+                    ) : (
+                      String(value)
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  function renderCompareResult(label: string, result: ExecutionResult | null, error: ErrorDetails | null) {
+    return (
+      <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
+        <div className="text-xs text-app-text-dim mb-2">Results — {label}</div>
+        {error ? (
+          <div className="bg-red-500/10 border border-red-500/30 rounded p-3">
+            <div className="text-red-400 font-semibold text-sm mb-1">Error</div>
+            <pre className="text-xs text-red-300 whitespace-pre-wrap font-mono">
+              {error.message}
+            </pre>
+          </div>
+        ) : result ? (
+          <>
+            <div className="mb-2 text-xs text-app-text-dim">
+              {result.rows?.length || 0} rows returned in {result.executionTime}ms
+            </div>
+            {renderRowsTable(result.rows || [])}
+          </>
+        ) : (
+          <div className="text-xs text-app-text-dim">No results yet</div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full">
       {/* Inner Sidebar */}
-      <InnerSidebar width="220px" />
+      <InnerSidebar width="220px" disabled={compareEnabled} />
 
       {/* Main Editor Area */}
       <div ref={containerRef} className="flex-1 grid min-h-0" style={{ gridTemplateRows: `minmax(220px, 1fr) 8px ${resultHeight}px` }}>
         {/* Editor */}
         <div className="flex flex-col border-b border-app-border min-h-0">
-          {/* Editor Hint Bar */}
-          <div className="px-4 py-1.5 bg-app-sidebar/30 border-b border-app-border/50 flex flex-wrap items-center gap-4 text-xs text-app-text-dim">
-            <div className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
-              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
-              <span>Run all</span>
+          {/* SQL Editor Bar */}
+          <div className="px-4 py-2 bg-app-sidebar/30 border-b border-app-border flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs uppercase text-app-text-dim">SQL Editor</span>
+              <button
+                onClick={handleToggleCompareMode}
+                className={`px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-2 ${compareEnabled ? 'bg-app-accent/20 text-app-accent' : 'bg-app-sidebar-active hover:bg-app-sidebar-hover text-app-text'}`}
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                Compare {compareEnabled ? 'On' : 'Off'}
+              </button>
             </div>
-            <div className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
-              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⇧</kbd>
-              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
-              <span>Run selected</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
-              <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">Space</kbd>
-              <span>Autocomplete</span>
-            </div>
+
+            {compareEnabled && (
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 text-xs text-app-text-dim">
+                  <GitBranch className="w-3.5 h-3.5" />
+                  <span>Branch A</span>
+                  <select
+                    value={compareBranches.a}
+                    onChange={(event) => handleCompareBranchChange('a', event.target.value)}
+                    className="bg-app-bg border border-app-border rounded px-2 py-1 text-xs text-app-text"
+                  >
+                    {compareBranchOptions.map((branch) => (
+                      <option key={branch} value={branch} disabled={branch === compareBranches.b}>{branch}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1 bg-app-sidebar-active rounded p-1">
+                  <button
+                    onClick={() => setCompareTab('change')}
+                    className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${compareTab === 'change' ? 'bg-app-accent/20 text-app-accent' : 'text-app-text-dim hover:text-app-text'}`}
+                    disabled={!!compareErrorMessage}
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    Change View
+                  </button>
+                  <button
+                    onClick={() => setCompareTab('preview')}
+                    className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${compareTab === 'preview' ? 'bg-app-accent/20 text-app-accent' : 'text-app-text-dim hover:text-app-text'}`}
+                    disabled={!!compareErrorMessage}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    SQL Preview
+                  </button>
+                  <button
+                    onClick={() => setCompareTab('manual')}
+                    className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${compareTab === 'manual' ? 'bg-app-accent/20 text-app-accent' : 'text-app-text-dim hover:text-app-text'}`}
+                    disabled={!!compareErrorMessage}
+                  >
+                    <Terminal className="w-3.5 h-3.5" />
+                    Manual Inspect
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-app-text-dim">
+                  <GitBranch className="w-3.5 h-3.5" />
+                  <span>Branch B</span>
+                  <select
+                    value={compareBranches.b}
+                    onChange={(event) => handleCompareBranchChange('b', event.target.value)}
+                    className="bg-app-bg border border-app-border rounded px-2 py-1 text-xs text-app-text"
+                  >
+                    {compareBranchOptions.map((branch) => (
+                      <option key={branch} value={branch} disabled={branch === compareBranches.a}>{branch}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="flex-1 bg-[#0f0f0f] min-h-0">
-            <MonacoEditor
-              height="100%"
-              language="sql"
-              theme="vs-dark"
-              value={editorState.sql}
-              onChange={(value) => updateSQL(value || '')}
-              onMount={handleEditorDidMount}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 2,
-                padding: { top: 16, bottom: 16 },
-                fontFamily: 'Monaco, Menlo, "Courier New", monospace',
-                suggestOnTriggerCharacters: true,
-                quickSuggestions: {
-                  other: true,
-                  comments: false,
-                  strings: false
-                },
-                parameterHints: {
-                  enabled: true
-                },
-                suggest: {
-                  showKeywords: true,
-                  showSnippets: true,
-                  showFunctions: true,
-                  snippetsPreventQuickSuggestions: false
-                },
-                formatOnPaste: true,
-                formatOnType: true,
-                autoClosingBrackets: 'always',
-                autoClosingQuotes: 'always',
-                bracketPairColorization: {
-                  enabled: true
-                }
-              }}
-            />
-          </div>
+
+          {!compareEnabled ? (
+            <>
+              {/* Editor Hint Bar */}
+              <div className="px-4 py-1.5 bg-app-sidebar/30 border-b border-app-border/50 flex flex-wrap items-center gap-4 text-xs text-app-text-dim">
+                <div className="flex items-center gap-1.5">
+                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
+                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
+                  <span>Run all</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
+                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⇧</kbd>
+                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
+                  <span>Run selected</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
+                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">Space</kbd>
+                  <span>Autocomplete</span>
+                </div>
+              </div>
+              <div className="flex-1 bg-[#0f0f0f] min-h-0">
+                <MonacoEditor
+                  height="100%"
+                  language="sql"
+                  theme="vs-dark"
+                  value={editorState.sql}
+                  onChange={(value) => updateSQL(value || '')}
+                  onMount={handleEditorDidMount}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    tabSize: 2,
+                    padding: { top: 16, bottom: 16 },
+                    fontFamily: 'Monaco, Menlo, "Courier New", monospace',
+                    suggestOnTriggerCharacters: true,
+                    quickSuggestions: {
+                      other: true,
+                      comments: false,
+                      strings: false
+                    },
+                    parameterHints: {
+                      enabled: true
+                    },
+                    suggest: {
+                      showKeywords: true,
+                      showSnippets: true,
+                      showFunctions: true,
+                      snippetsPreventQuickSuggestions: false
+                    },
+                    formatOnPaste: true,
+                    formatOnType: true,
+                    autoClosingBrackets: 'always',
+                    autoClosingQuotes: 'always',
+                    bracketPairColorization: {
+                      enabled: true
+                    }
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 bg-[#0f0f0f] min-h-0 overflow-hidden">
+              {compareErrorMessage && (
+                <div className="px-4 py-2 text-xs text-red-400 bg-red-500/10 border-b border-red-500/30">
+                  {compareErrorMessage}
+                </div>
+              )}
+
+              {compareTab === 'change' && (
+                <div className="h-full overflow-auto p-4 space-y-4">
+                  {compareLoading ? (
+                    <div className="text-xs text-app-text-dim">Loading changes...</div>
+                  ) : compareChanges ? (
+                    (() => {
+                      const hasChanges =
+                        compareChanges.addedTables.length ||
+                        compareChanges.removedTables.length ||
+                        compareChanges.addedIndexes.length ||
+                        compareChanges.removedIndexes.length ||
+                        compareChanges.addedTriggers.length ||
+                        compareChanges.removedTriggers.length ||
+                        compareChanges.tableChanges.length
+
+                      if (!hasChanges) {
+                        return (
+                          <div className="text-sm text-app-text-dim">No differences between selected branches</div>
+                        )
+                      }
+
+                      return (
+                        <div className="space-y-5">
+                          {compareChanges.addedTables.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Tables Added</h4>
+                              <div className="space-y-1">
+                                {compareChanges.addedTables.map((table) => (
+                                  <button
+                                    key={table.name}
+                                    onClick={() => setCompareTab('preview')}
+                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                  >
+                                    + {table.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {compareChanges.removedTables.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Tables Removed</h4>
+                              <div className="space-y-1">
+                                {compareChanges.removedTables.map((table) => (
+                                  <button
+                                    key={table.name}
+                                    onClick={() => setCompareTab('preview')}
+                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                  >
+                                    - {table.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {compareChanges.tableChanges.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Table Changes</h4>
+                              <div className="space-y-2">
+                                {compareChanges.tableChanges.map((change) => (
+                                  <button
+                                    key={change.table}
+                                    onClick={() => setCompareTab('preview')}
+                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                  >
+                                    <div className="font-medium text-app-text mb-1">{change.table}</div>
+                                    <div className="space-y-1 text-xs text-app-text-dim">
+                                      {change.addedColumns.map((col) => (
+                                        <div key={`added-${col.name}`}>+ {col.name} ({col.type})</div>
+                                      ))}
+                                      {change.removedColumns.map((col) => (
+                                        <div key={`removed-${col.name}`}>- {col.name}</div>
+                                      ))}
+                                      {change.modifiedColumns.map((col) => (
+                                        <div key={`modified-${col.name}`}>~ {col.name} ({col.fromType} → {col.toType})</div>
+                                      ))}
+                                      {change.rowCounts && (
+                                        <div>≈ rows: {change.rowCounts.a} → {change.rowCounts.b}</div>
+                                      )}
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {compareChanges.addedIndexes.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Indexes Added</h4>
+                              <div className="space-y-1">
+                                {compareChanges.addedIndexes.map((index) => (
+                                  <button
+                                    key={index.name}
+                                    onClick={() => setCompareTab('preview')}
+                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                  >
+                                    + {index.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {compareChanges.removedIndexes.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Indexes Removed</h4>
+                              <div className="space-y-1">
+                                {compareChanges.removedIndexes.map((index) => (
+                                  <button
+                                    key={index.name}
+                                    onClick={() => setCompareTab('preview')}
+                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                  >
+                                    - {index.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {compareChanges.addedTriggers.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Triggers Added</h4>
+                              <div className="space-y-1">
+                                {compareChanges.addedTriggers.map((trigger) => (
+                                  <button
+                                    key={trigger.name}
+                                    onClick={() => setCompareTab('preview')}
+                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                  >
+                                    + {trigger.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {compareChanges.removedTriggers.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Triggers Removed</h4>
+                              <div className="space-y-1">
+                                {compareChanges.removedTriggers.map((trigger) => (
+                                  <button
+                                    key={trigger.name}
+                                    onClick={() => setCompareTab('preview')}
+                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                  >
+                                    - {trigger.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()
+                  ) : (
+                    <div className="text-xs text-app-text-dim">Select two branches to compare.</div>
+                  )}
+                </div>
+              )}
+
+              {compareTab === 'preview' && (
+                <div className="h-full flex flex-col">
+                  <div className="px-4 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
+                    <div className="text-xs text-app-text-dim">Generated SQL (read-only)</div>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(compareSqlPreview)
+                      }}
+                      className="px-2 py-1 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded flex items-center gap-1.5"
+                    >
+                      <Copy className="w-3 h-3" />
+                      Copy
+                    </button>
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    <MonacoEditor
+                      height="100%"
+                      language="sql"
+                      theme="vs-dark"
+                      value={compareSqlPreview}
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        readOnly: true,
+                        tabSize: 2,
+                        padding: { top: 16, bottom: 16 },
+                        fontFamily: 'Monaco, Menlo, "Courier New", monospace'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {compareTab === 'manual' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 h-full gap-px bg-app-border">
+                  <div
+                    className={`flex flex-col min-h-0 ${compareActiveTerminal === 'a' ? 'bg-app-bg' : 'bg-app-bg'}`}
+                    onClick={() => setCompareActiveTerminal('a')}
+                  >
+                    <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs text-app-text-dim">
+                        <GitBranch className="w-3.5 h-3.5" />
+                        <span>{compareBranches.a || 'Branch A'}</span>
+                      </div>
+                      <span className="text-xs text-app-text-dim">Terminal A</span>
+                    </div>
+                    <div className="flex-1 min-h-0">
+                      <MonacoEditor
+                        height="100%"
+                        language="sql"
+                        theme="vs-dark"
+                        value={compareSqlA}
+                        onChange={(value) => setCompareSqlForTerminal('a', value || '')}
+                        onMount={(editor) => {
+                          editor.onDidFocusEditorWidget(() => setCompareActiveTerminal('a'))
+                        }}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 13,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          tabSize: 2,
+                          padding: { top: 16, bottom: 16 },
+                          fontFamily: 'Monaco, Menlo, "Courier New", monospace'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    className={`flex flex-col min-h-0 ${compareActiveTerminal === 'b' ? 'bg-app-bg' : 'bg-app-bg'}`}
+                    onClick={() => setCompareActiveTerminal('b')}
+                  >
+                    <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs text-app-text-dim">
+                        <GitBranch className="w-3.5 h-3.5" />
+                        <span>{compareBranches.b || 'Branch B'}</span>
+                      </div>
+                      <span className="text-xs text-app-text-dim">Terminal B</span>
+                    </div>
+                    <div className="flex-1 min-h-0">
+                      <MonacoEditor
+                        height="100%"
+                        language="sql"
+                        theme="vs-dark"
+                        value={compareSqlB}
+                        onChange={(value) => setCompareSqlForTerminal('b', value || '')}
+                        onMount={(editor) => {
+                          editor.onDidFocusEditorWidget(() => setCompareActiveTerminal('b'))
+                        }}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 13,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          tabSize: 2,
+                          padding: { top: 16, bottom: 16 },
+                          fontFamily: 'Monaco, Menlo, "Courier New", monospace'
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Resize Handle */}
@@ -547,12 +1407,16 @@ export default function SQLEditorPage() {
               {/* Export Dropdown */}
               <div className="relative" ref={exportMenuRef}>
                 <button
-                  onClick={() => setShowExportMenu(!showExportMenu)}
-                  disabled={!result?.rows || result.rows.length === 0}
+                  onClick={() => {
+                    if (!compareEnabled) setShowExportMenu(!showExportMenu)
+                  }}
+                  disabled={compareEnabled || !result?.rows || result.rows.length === 0}
+                  title={compareEnabled ? compareDisabledTitle : undefined}
                   className="px-3 py-1.5 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover disabled:opacity-50 rounded transition-colors flex items-center gap-1.5"
                 >
                   <Download className="w-3.5 h-3.5" />
                   Export
+                  {compareEnabled && <Lock className="w-3 h-3 text-app-text-dim" />}
                   <ChevronDown className="w-3 h-3" />
                 </button>
 
@@ -592,32 +1456,50 @@ export default function SQLEditorPage() {
 
               <button
                 onClick={handleTakeSnapshot}
-                className="px-3 py-1.5 text-xs bg-app-border hover:bg-app-sidebar-hover rounded transition-colors flex items-center gap-1.5"
+                disabled={compareEnabled}
+                title={compareEnabled ? compareDisabledTitle : undefined}
+                className="px-3 py-1.5 text-xs bg-app-border hover:bg-app-sidebar-hover disabled:opacity-50 rounded transition-colors flex items-center gap-1.5"
               >
                 <Camera className="w-3.5 h-3.5" />
                 Take snapshot
+                {compareEnabled && <Lock className="w-3 h-3 text-app-text-dim" />}
               </button>
               <button
                 onClick={handleSaveSelectionAsFavorite}
-                className="px-3 py-1.5 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded transition-colors flex items-center gap-1.5"
+                disabled={compareEnabled}
+                title={compareEnabled ? compareDisabledTitle : undefined}
+                className="px-3 py-1.5 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover disabled:opacity-50 rounded transition-colors flex items-center gap-1.5"
               >
                 <Star className="w-3.5 h-3.5" />
                 Save as Favorite
+                {compareEnabled && <Lock className="w-3 h-3 text-app-text-dim" />}
               </button>
               <button
                 onClick={handleSaveMigration}
-                className="px-3 py-1.5 text-xs bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 rounded transition-colors flex items-center gap-1.5"
+                disabled={compareEnabled}
+                title={compareEnabled ? compareDisabledTitle : undefined}
+                className="px-3 py-1.5 text-xs bg-orange-500/20 hover:bg-orange-500/30 disabled:opacity-50 text-orange-400 rounded transition-colors flex items-center gap-1.5"
               >
                 <Save className="w-3.5 h-3.5" />
                 Save as Migration
+                {compareEnabled && <Lock className="w-3 h-3 text-app-text-dim" />}
               </button>
-              <button
-                onClick={() => handleExecute()}
-                disabled={loading}
-                className="px-4 py-1.5 text-xs bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors font-medium"
-              >
-                {loading ? 'Running...' : 'Run'}
-              </button>
+              {(!compareEnabled || compareTab === 'manual') && (
+                <button
+                  onClick={() => {
+                    if (compareEnabled) {
+                      handleCompareExecuteBoth()
+                    } else {
+                      handleExecute()
+                    }
+                  }}
+                  disabled={compareEnabled ? !canRunCompare || loading : loading}
+                  title={compareEnabled && !canRunCompare ? 'Run is available in Manual Inspect with two different branches selected' : undefined}
+                  className="px-4 py-1.5 text-xs bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors font-medium"
+                >
+                  {loading ? 'Running...' : 'Run'}
+                </button>
+              )}
             </div>
             </div>
           </div>
@@ -626,7 +1508,18 @@ export default function SQLEditorPage() {
           <div className="flex-1 overflow-auto p-4">
             {editorState.activeTab === 'result' && (
               <div>
-                {error ? (
+                {compareEnabled ? (
+                  compareTab !== 'manual' ? (
+                    <div className="text-app-text-dim text-center py-8 text-sm">
+                      Results are available in Manual Inspect.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {renderCompareResult(compareBranches.a || 'Branch A', compareResults.a, compareErrors.a)}
+                      {renderCompareResult(compareBranches.b || 'Branch B', compareResults.b, compareErrors.b)}
+                    </div>
+                  )
+                ) : error ? (
                   <div className="bg-red-500/10 border border-red-500/30 rounded p-3">
                     <div className="text-red-400 font-semibold text-sm mb-1">Error</div>
                     <pre className="text-xs text-red-300 whitespace-pre-wrap font-mono">
@@ -640,40 +1533,7 @@ export default function SQLEditorPage() {
                         <div className="mb-2 text-xs text-app-text-dim">
                           {result.rows?.length || 0} rows returned in {result.executionTime}ms
                         </div>
-                        {(result.rows?.length || 0) === 0 ? (
-                          <div className="text-app-text-dim text-center py-8 text-sm">
-                            No rows returned
-                          </div>
-                        ) : (
-                          <div className="border border-app-panel-border rounded overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead className="bg-app-sidebar-active">
-                                <tr>
-                                  {result.rows && result.rows.length > 0 && Object.keys(result.rows[0]).map((key) => (
-                                    <th key={key} className="px-3 py-2 text-left font-medium whitespace-nowrap">
-                                      {key}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {result.rows?.map((row: any, i: number) => (
-                                  <tr key={i} className="border-t border-app-panel-border hover:bg-app-sidebar-hover">
-                                    {Object.values(row).map((value: any, j: number) => (
-                                      <td key={j} className="px-3 py-2 font-mono">
-                                        {value === null ? (
-                                          <span className="text-app-text-dim italic">NULL</span>
-                                        ) : (
-                                          String(value)
-                                        )}
-                                      </td>
-                                    ))}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
+                        {renderRowsTable(result.rows || [])}
                       </>
                     ) : (
                       <div className="bg-green-500/10 border border-green-500/30 rounded p-3">
@@ -697,7 +1557,40 @@ export default function SQLEditorPage() {
 
             {editorState.activeTab === 'errors' && (
               <div>
-                {error ? (
+                {compareEnabled ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
+                      <div className="text-xs text-app-text-dim mb-2">Errors — {compareBranches.a || 'Branch A'}</div>
+                      {compareErrors.a ? (
+                        <div className="bg-red-500/10 border border-red-500/30 rounded p-3">
+                          <pre className="text-xs text-red-300 whitespace-pre-wrap font-mono">
+                            {compareErrors.a.message}
+                          </pre>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-green-400">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          No errors
+                        </div>
+                      )}
+                    </div>
+                    <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
+                      <div className="text-xs text-app-text-dim mb-2">Errors — {compareBranches.b || 'Branch B'}</div>
+                      {compareErrors.b ? (
+                        <div className="bg-red-500/10 border border-red-500/30 rounded p-3">
+                          <pre className="text-xs text-red-300 whitespace-pre-wrap font-mono">
+                            {compareErrors.b.message}
+                          </pre>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-green-400">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          No errors
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : error ? (
                   <div className="space-y-4">
                     {/* Error Summary */}
                     <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
@@ -774,101 +1667,140 @@ export default function SQLEditorPage() {
 
             {editorState.activeTab === 'info' && (
               <div className="space-y-4">
-                {/* Execution Metadata */}
-                {result && (
-                  <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
-                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                      <Info className="w-4 h-4" />
-                      Execution Metadata
-                    </h3>
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <div className="text-app-text-dim mb-1">Execution time</div>
-                        <div className="font-mono">{result.executionTime}ms</div>
-                      </div>
-                      <div>
-                        <div className="text-app-text-dim mb-1">Query type</div>
-                        <div className="font-mono">{lastQueryType}</div>
-                      </div>
-                      {result.changes !== undefined && (
-                        <div>
-                          <div className="text-app-text-dim mb-1">Rows affected</div>
-                          <div className="font-mono">{result.changes}</div>
+                {compareEnabled ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {(['a', 'b'] as const).map((target) => {
+                      const label = target === 'a' ? (compareBranches.a || 'Branch A') : (compareBranches.b || 'Branch B')
+                      const info = compareResults[target]
+                      return (
+                        <div key={target} className="bg-app-sidebar border border-app-border rounded-lg p-4">
+                          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                            <Info className="w-4 h-4" />
+                            Execution Metadata — {label}
+                          </h3>
+                          {info ? (
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                              <div>
+                                <div className="text-app-text-dim mb-1">Execution time</div>
+                                <div className="font-mono">{info.executionTime}ms</div>
+                              </div>
+                              <div>
+                                <div className="text-app-text-dim mb-1">Query type</div>
+                                <div className="font-mono">{compareQueryTypes[target]}</div>
+                              </div>
+                              {info.rows && (
+                                <div>
+                                  <div className="text-app-text-dim mb-1">Rows returned</div>
+                                  <div className="font-mono">{info.rows.length}</div>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-app-text-dim">No execution yet</div>
+                          )}
                         </div>
-                      )}
-                      {result.rows && (
-                        <div>
-                          <div className="text-app-text-dim mb-1">Rows returned</div>
-                          <div className="font-mono">{result.rows.length}</div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <>
+                    {/* Execution Metadata */}
+                    {result && (
+                      <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
+                        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                          <Info className="w-4 h-4" />
+                          Execution Metadata
+                        </h3>
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <div className="text-app-text-dim mb-1">Execution time</div>
+                            <div className="font-mono">{result.executionTime}ms</div>
+                          </div>
+                          <div>
+                            <div className="text-app-text-dim mb-1">Query type</div>
+                            <div className="font-mono">{lastQueryType}</div>
+                          </div>
+                          {result.changes !== undefined && (
+                            <div>
+                              <div className="text-app-text-dim mb-1">Rows affected</div>
+                              <div className="font-mono">{result.changes}</div>
+                            </div>
+                          )}
+                          {result.rows && (
+                            <div>
+                              <div className="text-app-text-dim mb-1">Rows returned</div>
+                              <div className="font-mono">{result.rows.length}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Migration Eligibility */}
+                    <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
+                      <h3 className="text-sm font-semibold mb-3">Migration Eligibility</h3>
+                      {isMigrationEligible(lastQueryType) ? (
+                        <div className="flex items-start gap-2 text-xs">
+                          <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-green-400 mb-1">This query can be saved as a migration</p>
+                            <p className="text-app-text-dim">
+                              DDL statements (CREATE, ALTER, DROP) can be versioned as migrations.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2 text-xs">
+                          <AlertCircle className="w-4 h-4 text-app-text-dim flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-app-text-dim mb-1">This query cannot be saved as a migration</p>
+                            <p className="text-app-text-dim">
+                              Only DDL statements (CREATE, ALTER, DROP) can be migrations.
+                            </p>
+                          </div>
                         </div>
                       )}
                     </div>
-                  </div>
+
+                    {/* Editor Features */}
+                    <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
+                      <h3 className="text-sm font-semibold mb-3">Editor Features</h3>
+                      <div className="space-y-2 text-xs text-app-text-dim">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                          SQL autocomplete enabled
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                          Press Ctrl+Space for suggestions
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                          Hover over keywords for documentation
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                          Schema-aware column suggestions
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* System Info */}
+                    <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
+                      <h3 className="text-sm font-semibold mb-3">System Information</h3>
+                      <div className="space-y-1 text-xs text-app-text-dim">
+                        <div className="flex items-center gap-2">
+                          <Database className="w-3.5 h-3.5" />
+                          SQLite 3.44.0
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-3.5 h-3.5" />
+                          Monaco Editor
+                        </div>
+                      </div>
+                    </div>
+                  </>
                 )}
-
-                {/* Migration Eligibility */}
-                <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
-                  <h3 className="text-sm font-semibold mb-3">Migration Eligibility</h3>
-                  {isMigrationEligible(lastQueryType) ? (
-                    <div className="flex items-start gap-2 text-xs">
-                      <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-green-400 mb-1">This query can be saved as a migration</p>
-                        <p className="text-app-text-dim">
-                          DDL statements (CREATE, ALTER, DROP) can be versioned as migrations.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-start gap-2 text-xs">
-                      <AlertCircle className="w-4 h-4 text-app-text-dim flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-app-text-dim mb-1">This query cannot be saved as a migration</p>
-                        <p className="text-app-text-dim">
-                          Only DDL statements (CREATE, ALTER, DROP) can be migrations.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Editor Features */}
-                <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
-                  <h3 className="text-sm font-semibold mb-3">Editor Features</h3>
-                  <div className="space-y-2 text-xs text-app-text-dim">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      SQL autocomplete enabled
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      Press Ctrl+Space for suggestions
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      Hover over keywords for documentation
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                      Schema-aware column suggestions
-                    </div>
-                  </div>
-                </div>
-
-                {/* System Info */}
-                <div className="bg-app-sidebar border border-app-border rounded-lg p-4">
-                  <h3 className="text-sm font-semibold mb-3">System Information</h3>
-                  <div className="space-y-1 text-xs text-app-text-dim">
-                    <div className="flex items-center gap-2">
-                      <Database className="w-3.5 h-3.5" />
-                      SQLite 3.44.0
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-3.5 h-3.5" />
-                      Monaco Editor
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
           </div>

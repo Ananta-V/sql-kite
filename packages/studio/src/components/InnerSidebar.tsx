@@ -14,7 +14,8 @@ import {
   Copy,
   Trash2,
   Edit,
-  FolderPlus
+  FolderPlus,
+  Lock
 } from 'lucide-react'
 
 interface SnippetItem {
@@ -28,10 +29,12 @@ interface SnippetItem {
 
 interface InnerSidebarProps {
   width?: string
+  disabled?: boolean
 }
 
-export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
+export default function InnerSidebar({ width = '240px', disabled = false }: InnerSidebarProps) {
   const { updateSQL } = useAppContext()
+  const disableTitle = 'Disabled in Compare Mode'
   const [favorites, setFavorites] = useState<SnippetItem[]>([])
   const [templates, setTemplates] = useState<SnippetItem[]>([])
 
@@ -100,15 +103,18 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
   }
 
   function handleContextMenu(e: React.MouseEvent, item: SnippetItem, section: 'favorites' | 'templates') {
+    if (disabled) return
     e.preventDefault()
     setContextMenu({ x: e.clientX, y: e.clientY, item, section })
   }
 
   function handleDragStart(item: SnippetItem, section: 'favorites' | 'templates') {
+    if (disabled) return
     setDraggedItem({ item, section })
   }
 
   function handleDrop(targetItem: SnippetItem, targetSection: 'favorites' | 'templates') {
+    if (disabled) return
     if (!draggedItem) return
 
     // Handle drop logic here
@@ -117,6 +123,7 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
   }
 
   function handleAddSnippet(section: 'favorites' | 'templates') {
+    if (disabled) return
     const newSnippet: SnippetItem = {
       id: `snippet-${Date.now()}`,
       label: 'New snippet',
@@ -132,6 +139,7 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
   }
 
   function handleAddFolder(section: 'favorites' | 'templates') {
+    if (disabled) return
     const newFolder: SnippetItem = {
       id: `folder-${Date.now()}`,
       label: 'New folder',
@@ -197,6 +205,7 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
     const isExpanded = expandedFolders.has(item.id)
 
     function handleClick() {
+      if (disabled) return
       if (isFolder) {
         toggleFolder(item.id)
       } else if (item.sql) {
@@ -219,6 +228,7 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
             transition-colors cursor-pointer group
             hover:bg-app-sidebar-hover
           `}
+          title={disabled ? disableTitle : undefined}
           style={{ paddingLeft: `${8 + depth * 12}px` }}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -250,6 +260,8 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
               handleContextMenu(e, item, section)
             }}
             className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-app-sidebar-active rounded"
+            disabled={disabled}
+            title={disabled ? disableTitle : undefined}
           >
             <MoreVertical className="w-3.5 h-3.5 text-app-text-dim" />
           </button>
@@ -267,7 +279,7 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
 
   return (
     <div
-      className="bg-app-sidebar border-r border-app-border overflow-y-auto flex-shrink-0"
+      className={`bg-app-sidebar border-r border-app-border overflow-y-auto flex-shrink-0 ${disabled ? 'opacity-70' : ''}`}
       style={{ width }}
       onClick={() => setContextMenu(null)}
     >
@@ -276,8 +288,11 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
         <div className="mb-4">
           <div className="flex items-center justify-between px-2 py-1.5 mb-1">
             <button
-              onClick={() => setFavoritesCollapsed(!favoritesCollapsed)}
+              onClick={() => {
+                if (!disabled) setFavoritesCollapsed(!favoritesCollapsed)
+              }}
               className="flex items-center gap-2 text-xs text-app-text-dim hover:text-app-text transition-colors"
+              title={disabled ? disableTitle : undefined}
             >
               {favoritesCollapsed ? (
                 <ChevronRight className="w-3 h-3" />
@@ -286,6 +301,7 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
               )}
               <Star className="w-3.5 h-3.5" />
               <span className="font-medium uppercase tracking-wide">Favorites</span>
+              {disabled && <Lock className="w-3 h-3 text-app-text-dim" />}
             </button>
 
             {!favoritesCollapsed && (
@@ -293,14 +309,16 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
                 <button
                   onClick={() => handleAddSnippet('favorites')}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title="Add snippet"
+                  title={disabled ? disableTitle : 'Add snippet'}
+                  disabled={disabled}
                 >
                   <Plus className="w-3.5 h-3.5 text-app-text-dim" />
                 </button>
                 <button
                   onClick={() => handleAddFolder('favorites')}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title="Add folder"
+                  title={disabled ? disableTitle : 'Add folder'}
+                  disabled={disabled}
                 >
                   <FolderPlus className="w-3.5 h-3.5 text-app-text-dim" />
                 </button>
@@ -325,8 +343,11 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
         <div>
           <div className="flex items-center justify-between px-2 py-1.5 mb-1">
             <button
-              onClick={() => setTemplatesCollapsed(!templatesCollapsed)}
+              onClick={() => {
+                if (!disabled) setTemplatesCollapsed(!templatesCollapsed)
+              }}
               className="flex items-center gap-2 text-xs text-app-text-dim hover:text-app-text transition-colors"
+              title={disabled ? disableTitle : undefined}
             >
               {templatesCollapsed ? (
                 <ChevronRight className="w-3 h-3" />
@@ -335,6 +356,7 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
               )}
               <FileCode className="w-3.5 h-3.5" />
               <span className="font-medium uppercase tracking-wide">Templates</span>
+              {disabled && <Lock className="w-3 h-3 text-app-text-dim" />}
             </button>
 
             {!templatesCollapsed && (
@@ -342,14 +364,16 @@ export default function InnerSidebar({ width = '240px' }: InnerSidebarProps) {
                 <button
                   onClick={() => handleAddSnippet('templates')}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title="Add snippet"
+                  title={disabled ? disableTitle : 'Add snippet'}
+                  disabled={disabled}
                 >
                   <Plus className="w-3.5 h-3.5 text-app-text-dim" />
                 </button>
                 <button
                   onClick={() => handleAddFolder('templates')}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title="Add folder"
+                  title={disabled ? disableTitle : 'Add folder'}
+                  disabled={disabled}
                 >
                   <FolderPlus className="w-3.5 h-3.5 text-app-text-dim" />
                 </button>

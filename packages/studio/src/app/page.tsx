@@ -20,6 +20,7 @@ function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('home')
   const [showBranchModal, setShowBranchModal] = useState(false)
   const [showAIPanel, setShowAIPanel] = useState(false)
+  const [compareMode, setCompareMode] = useState(false)
   const { projectInfo, setProjectInfo } = useAppContext()
 
   useEffect(() => {
@@ -43,6 +44,12 @@ function AppContent() {
     setShowBranchModal(true)
   }
 
+  useEffect(() => {
+    if (currentPage !== 'sql' && compareMode) {
+      setCompareMode(false)
+    }
+  }, [currentPage, compareMode])
+
   // Show AI button only on SQL editor page
   const showAI = currentPage === 'sql'
 
@@ -58,11 +65,17 @@ function AppContent() {
           onCreateBranchClick={handleCreateBranch}
           showAI={showAI}
           onAIClick={() => setShowAIPanel((open) => !open)}
+          disableBranchSelector={currentPage === 'sql' && compareMode}
         />
 
         <main className="flex-1 overflow-hidden">
           {currentPage === 'home' && <HomePage projectInfo={projectInfo} />}
-          {currentPage === 'sql' && <SQLEditorPage />}
+          {currentPage === 'sql' && (
+            <SQLEditorPage
+              compareMode={compareMode}
+              onCompareModeChange={setCompareMode}
+            />
+          )}
           {currentPage === 'database' && <DatabasePage />}
           {currentPage === 'branches' && (
             <BranchesPage 
@@ -77,7 +90,7 @@ function AppContent() {
           {currentPage === 'settings' && (
             <div className="p-8">
               <h1 className="text-2xl font-bold">Settings</h1>
-              <p className="text-app-text-dim mt-2">Coming soon...</p>
+              <p className="text-app-text-dim mt-2">settings will be added later to further modify values and workflows.</p>
             </div>
           )}
         </main>

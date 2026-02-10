@@ -10,6 +10,7 @@ interface TopBarProps {
   onCreateBranchClick?: () => void
   showAI?: boolean
   onAIClick?: () => void
+  disableBranchSelector?: boolean
 }
 
 export default function TopBar({
@@ -18,7 +19,8 @@ export default function TopBar({
   onBranchChange,
   onCreateBranchClick,
   showAI = false,
-  onAIClick
+  onAIClick,
+  disableBranchSelector = false
 }: TopBarProps) {
   if (!projectInfo) return null
 
@@ -41,6 +43,7 @@ export default function TopBar({
           currentBranch={branchToShow}
           onBranchChange={onBranchChange}
           onCreateClick={onCreateBranchClick}
+          disabled={disableBranchSelector}
         />
 
         {/* AI Button - Only on SQL editor */}

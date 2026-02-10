@@ -15,7 +15,8 @@ import {
   Trash2,
   Edit,
   FolderPlus,
-  Lock
+  Lock,
+  FolderLock
 } from 'lucide-react'
 
 interface SnippetItem {
@@ -30,9 +31,18 @@ interface SnippetItem {
 interface InnerSidebarProps {
   width?: string
   disabled?: boolean
+  privateItems?: SnippetItem[]
+  onPrivateItemsChange?: (items: SnippetItem[]) => void
+  onPrivateItemClick?: (item: SnippetItem) => void
 }
 
-export default function InnerSidebar({ width = '240px', disabled = false }: InnerSidebarProps) {
+export default function InnerSidebar({ 
+  width = '240px', 
+  disabled = false,
+  privateItems = [],
+  onPrivateItemsChange,
+  onPrivateItemClick
+}: InnerSidebarProps) {
   const { updateSQL } = useAppContext()
   const disableTitle = 'Disabled in Compare Mode'
   const [favorites, setFavorites] = useState<SnippetItem[]>([])
@@ -40,9 +50,17 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
 
   const [favoritesCollapsed, setFavoritesCollapsed] = useState(false)
   const [templatesCollapsed, setTemplatesCollapsed] = useState(false)
+  const [privateCollapsed, setPrivateCollapsed] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: SnippetItem; section: 'favorites' | 'templates' } | null>(null)
-  const [draggedItem, setDraggedItem] = useState<{ item: SnippetItem; section: 'favorites' | 'templates' } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
+  const [draggedItem, setDraggedItem] = useState<{ item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
+  
+  // Rename modal state
+  const [renameModal, setRenameModal] = useState<{ item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  
+  // Delete confirm modal state
+  const [deleteModal, setDeleteModal] = useState<{ item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -102,18 +120,18 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
     })
   }
 
-  function handleContextMenu(e: React.MouseEvent, item: SnippetItem, section: 'favorites' | 'templates') {
+  function handleContextMenu(e: React.MouseEvent, item: SnippetItem, section: 'favorites' | 'templates' | 'private') {
     if (disabled) return
     e.preventDefault()
     setContextMenu({ x: e.clientX, y: e.clientY, item, section })
   }
 
-  function handleDragStart(item: SnippetItem, section: 'favorites' | 'templates') {
+  function handleDragStart(item: SnippetItem, section: 'favorites' | 'templates' | 'private') {
     if (disabled) return
     setDraggedItem({ item, section })
   }
 
-  function handleDrop(targetItem: SnippetItem, targetSection: 'favorites' | 'templates') {
+  function handleDrop(targetItem: SnippetItem, targetSection: 'favorites' | 'templates' | 'private') {
     if (disabled) return
     if (!draggedItem) return
 
@@ -122,7 +140,7 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
     setDraggedItem(null)
   }
 
-  function handleAddSnippet(section: 'favorites' | 'templates') {
+  function handleAddSnippet(section: 'favorites' | 'templates' | 'private') {
     if (disabled) return
     const newSnippet: SnippetItem = {
       id: `snippet-${Date.now()}`,
@@ -133,12 +151,14 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
 
     if (section === 'favorites') {
       setFavorites([...favorites, newSnippet])
-    } else {
+    } else if (section === 'templates') {
       setTemplates([...templates, newSnippet])
+    } else if (section === 'private' && onPrivateItemsChange) {
+      onPrivateItemsChange([...privateItems, newSnippet])
     }
   }
 
-  function handleAddFolder(section: 'favorites' | 'templates') {
+  function handleAddFolder(section: 'favorites' | 'templates' | 'private') {
     if (disabled) return
     const newFolder: SnippetItem = {
       id: `folder-${Date.now()}`,
@@ -149,56 +169,91 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
 
     if (section === 'favorites') {
       setFavorites([...favorites, newFolder])
-    } else {
+    } else if (section === 'templates') {
       setTemplates([...templates, newFolder])
+    } else if (section === 'private' && onPrivateItemsChange) {
+      onPrivateItemsChange([...privateItems, newFolder])
     }
   }
 
   function handleCopy() {
     if (contextMenu) {
-      console.log('Copy', contextMenu.item.label)
-      // Implement copy logic
+      if (contextMenu.item.sql) {
+        navigator.clipboard.writeText(contextMenu.item.sql)
+      }
       setContextMenu(null)
     }
   }
 
   function handleRename() {
     if (contextMenu) {
-      const newName = prompt('Enter new name:', contextMenu.item.label)
-      if (newName) {
-        // Implement rename logic
-        console.log('Rename', contextMenu.item.label, 'to', newName)
-      }
+      setRenameValue(contextMenu.item.label)
+      setRenameModal({ item: contextMenu.item, section: contextMenu.section })
       setContextMenu(null)
     }
+  }
+
+  function confirmRename() {
+    if (!renameModal || !renameValue.trim()) return
+    
+    const updateItemName = (items: SnippetItem[]): SnippetItem[] => {
+      return items.map(item => {
+        if (item.id === renameModal.item.id) {
+          return { ...item, label: renameValue.trim() }
+        }
+        if (item.children) {
+          return { ...item, children: updateItemName(item.children) }
+        }
+        return item
+      })
+    }
+
+    if (renameModal.section === 'favorites') {
+      setFavorites(updateItemName(favorites))
+    } else if (renameModal.section === 'templates') {
+      setTemplates(updateItemName(templates))
+    } else if (renameModal.section === 'private' && onPrivateItemsChange) {
+      onPrivateItemsChange(updateItemName(privateItems))
+    }
+    
+    setRenameModal(null)
+    setRenameValue('')
   }
 
   function handleDelete() {
     if (contextMenu) {
-      if (confirm(`Delete "${contextMenu.item.label}"?`)) {
-        if (contextMenu.section === 'favorites') {
-          setFavorites(favorites.filter(f => f.id !== contextMenu.item.id))
-        } else {
-          // Handle nested deletion in templates
-          const deleteFromArray = (items: SnippetItem[]): SnippetItem[] => {
-            return items.filter(item => {
-              if (item.id === contextMenu.item.id) return false
-              if (item.children) {
-                item.children = deleteFromArray(item.children)
-              }
-              return true
-            })
-          }
-          setTemplates(deleteFromArray(templates))
-        }
-      }
+      setDeleteModal({ item: contextMenu.item, section: contextMenu.section })
       setContextMenu(null)
     }
   }
 
+  function confirmDelete() {
+    if (!deleteModal) return
+    
+    const deleteFromArray = (items: SnippetItem[]): SnippetItem[] => {
+      return items.filter(item => {
+        if (item.id === deleteModal.item.id) return false
+        if (item.children) {
+          item.children = deleteFromArray(item.children)
+        }
+        return true
+      })
+    }
+
+    if (deleteModal.section === 'favorites') {
+      setFavorites(deleteFromArray(favorites))
+    } else if (deleteModal.section === 'templates') {
+      setTemplates(deleteFromArray(templates))
+    } else if (deleteModal.section === 'private' && onPrivateItemsChange) {
+      onPrivateItemsChange(deleteFromArray(privateItems))
+    }
+    
+    setDeleteModal(null)
+  }
+
   function renderItem(
     item: SnippetItem,
-    section: 'favorites' | 'templates',
+    section: 'favorites' | 'templates' | 'private',
     depth: number = 0
   ) {
     const isFolder = item.type === 'folder'
@@ -208,6 +263,8 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
       if (disabled) return
       if (isFolder) {
         toggleFolder(item.id)
+      } else if (section === 'private' && onPrivateItemClick) {
+        onPrivateItemClick(item)
       } else if (item.sql) {
         // Load SQL into editor when clicking on a file
         updateSQL(item.sql)
@@ -387,6 +444,61 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
             </div>
           )}
         </div>
+
+        {/* Private Section */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+            <button
+              onClick={() => {
+                if (!disabled) setPrivateCollapsed(!privateCollapsed)
+              }}
+              className="flex items-center gap-2 text-xs text-app-text-dim hover:text-app-text transition-colors"
+              title={disabled ? disableTitle : undefined}
+            >
+              {privateCollapsed ? (
+                <ChevronRight className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
+              <FolderLock className="w-3.5 h-3.5" />
+              <span className="font-medium uppercase tracking-wide">Private</span>
+              {disabled && <Lock className="w-3 h-3 text-app-text-dim" />}
+            </button>
+
+            {!privateCollapsed && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => handleAddSnippet('private')}
+                  className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
+                  title={disabled ? disableTitle : 'Add snippet'}
+                  disabled={disabled}
+                >
+                  <Plus className="w-3.5 h-3.5 text-app-text-dim" />
+                </button>
+                <button
+                  onClick={() => handleAddFolder('private')}
+                  className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
+                  title={disabled ? disableTitle : 'Add folder'}
+                  disabled={disabled}
+                >
+                  <FolderPlus className="w-3.5 h-3.5 text-app-text-dim" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {!privateCollapsed && (
+            <div className="space-y-0.5">
+              {privateItems.length === 0 ? (
+                <div className="px-2 py-4 text-xs text-app-text-dim text-center">
+                  No private queries yet
+                </div>
+              ) : (
+                privateItems.map(item => renderItem(item, 'private'))
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Context Menu */}
@@ -416,6 +528,65 @@ export default function InnerSidebar({ width = '240px', disabled = false }: Inne
             <Trash2 className="w-4 h-4" />
             <span>Delete</span>
           </button>
+        </div>
+      )}
+
+      {/* Rename Modal */}
+      {renameModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setRenameModal(null)}>
+          <div className="bg-app-sidebar border border-app-border rounded-lg p-4 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-3">Rename</h3>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmRename()
+                if (e.key === 'Escape') setRenameModal(null)
+              }}
+              className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-sm focus:outline-none focus:border-app-accent"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setRenameModal(null)}
+                className="px-3 py-1.5 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRename}
+                disabled={!renameValue.trim()}
+                className="px-3 py-1.5 text-xs bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors"
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setDeleteModal(null)}>
+          <div className="bg-app-sidebar border border-app-border rounded-lg p-4 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold mb-3">Delete "{deleteModal.item.label}"?</h3>
+            <p className="text-xs text-app-text-dim mb-4">This action cannot be undone.</p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteModal(null)}
+                className="px-3 py-1.5 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-3 py-1.5 text-xs bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

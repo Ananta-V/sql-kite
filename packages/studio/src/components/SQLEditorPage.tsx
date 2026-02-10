@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { Save, Star, ChevronDown, Camera, Copy, AlertCircle, Info, FileText, Download, Database, CheckCircle, Lock, ArrowLeftRight, GitBranch, Eye, List, Terminal } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Save, Star, ChevronDown, Camera, Copy, AlertCircle, Info, FileText, Download, Database, CheckCircle, Lock, ArrowLeftRight, GitBranch, Eye, List, Terminal, X, Plus, FileCode } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import InnerSidebar from './InnerSidebar'
 import { executeQuery, executeCompareQuery, checkpointCompareBranches, closeCompareBranches, getBranches, getTables, getTableInfo, createMigration, createSnapshot } from '@/lib/api'
@@ -61,6 +61,12 @@ interface CompareChanges {
   tableChanges: CompareTableChange[]
 }
 
+interface QueryTab {
+  id: string
+  name: string
+  sql: string
+}
+
 interface SQLEditorPageProps {
   compareMode?: boolean
   onCompareModeChange?: (next: boolean) => void
@@ -108,6 +114,193 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   const hoverProviderRef = useRef<SQLHoverProvider | null>(null)
   const editorRef = useRef<any>(null)
   const monacoRef = useRef<any>(null)
+
+  // Query tabs state
+  const [queryTabs, setQueryTabs] = useState<QueryTab[]>(() => {
+    if (typeof window === 'undefined') return [{ id: 'tab-1', name: 'Untitled query', sql: '-- Write your SQL query here\n' }]
+    const saved = localStorage.getItem('localdb-query-tabs')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      } catch (e) { /* ignore */ }
+    }
+    return [{ id: 'tab-1', name: 'Untitled query', sql: '-- Write your SQL query here\n' }]
+  })
+  const [activeQueryTabId, setActiveQueryTabId] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'tab-1'
+    const saved = localStorage.getItem('localdb-active-query-tab')
+    return saved || 'tab-1'
+  })
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
+  const [renamingValue, setRenamingValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
+
+  // Private items state
+  const [privateItems, setPrivateItems] = useState<Array<{ id: string; label: string; sql?: string; type: 'file' | 'folder'; expanded?: boolean; children?: any[] }>>(() => {
+    if (typeof window === 'undefined') return []
+    const saved = localStorage.getItem('localdb-private')
+    if (saved) {
+      try {
+        return JSON.parse(saved)
+      } catch (e) { /* ignore */ }
+    }
+    return []
+  })
+
+  // Persist private items to localStorage
+  useEffect(() => {
+    localStorage.setItem('localdb-private', JSON.stringify(privateItems))
+  }, [privateItems])
+
+  // Save modal state
+  const [saveModal, setSaveModal] = useState<{ type: 'favorite' | 'template' | 'private'; sql: string } | null>(null)
+  const [saveItemName, setSaveItemName] = useState('')
+  const [tabContextMenu, setTabContextMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
+
+  // Persist tabs to localStorage
+  useEffect(() => {
+    localStorage.setItem('localdb-query-tabs', JSON.stringify(queryTabs))
+  }, [queryTabs])
+
+  useEffect(() => {
+    localStorage.setItem('localdb-active-query-tab', activeQueryTabId)
+  }, [activeQueryTabId])
+
+  // Ctrl+S to open save dropdown
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        const activeTab = queryTabs.find(t => t.id === activeQueryTabId)
+        if (activeTab?.sql) {
+          // Show save modal with 'private' as default
+          setSaveModal({ type: 'private', sql: activeTab.sql })
+          setSaveItemName(activeTab.name !== 'Untitled query' ? activeTab.name : '')
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [queryTabs, activeQueryTabId])
+
+  // Close tab context menu on click outside
+  useEffect(() => {
+    if (!tabContextMenu) return
+    const handleClick = () => setTabContextMenu(null)
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [tabContextMenu])
+
+  // Handle save to different sections
+  const handleSaveAs = useCallback((type: 'favorite' | 'template' | 'private') => {
+    if (!saveModal) return
+    const name = saveItemName.trim()
+    if (!name) return
+
+    if (type === 'favorite') {
+      addFavorite(name, saveModal.sql)
+    } else if (type === 'template') {
+      const saved = localStorage.getItem('localdb-templates')
+      const templates = saved ? JSON.parse(saved) : []
+      templates.push({ id: `tmpl-${Date.now()}`, label: name, sql: saveModal.sql, type: 'snippet' })
+      localStorage.setItem('localdb-templates', JSON.stringify(templates))
+      window.dispatchEvent(new Event('storage'))
+    } else if (type === 'private') {
+      setPrivateItems(prev => [...prev, { id: `priv-${Date.now()}`, label: name, sql: saveModal.sql, type: 'file' }])
+    }
+
+    setSaveModal(null)
+    setSaveItemName('')
+  }, [saveModal, saveItemName, addFavorite])
+
+  // Sync current tab SQL with editor
+  const activeQueryTab = queryTabs.find(t => t.id === activeQueryTabId) || queryTabs[0]
+
+  const updateCurrentTabSQL = useCallback((sql: string) => {
+    setQueryTabs(prev => prev.map(tab => 
+      tab.id === activeQueryTabId ? { ...tab, sql } : tab
+    ))
+    updateSQL(sql)
+  }, [activeQueryTabId, updateSQL])
+
+  // When switching tabs, load the tab's SQL
+  useEffect(() => {
+    if (activeQueryTab) {
+      updateSQL(activeQueryTab.sql)
+    }
+  }, [activeQueryTabId])
+
+  // Tab operations
+  const addNewTab = useCallback(() => {
+    const newId = `tab-${Date.now()}`
+    const newTab: QueryTab = { id: newId, name: 'Untitled query', sql: '' }
+    setQueryTabs(prev => [...prev, newTab])
+    setActiveQueryTabId(newId)
+  }, [])
+
+  const closeTab = useCallback((tabId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    setQueryTabs(prev => {
+      if (prev.length === 1) return prev // Keep at least one tab
+      const newTabs = prev.filter(t => t.id !== tabId)
+      if (activeQueryTabId === tabId) {
+        const idx = prev.findIndex(t => t.id === tabId)
+        const newActiveIdx = Math.min(idx, newTabs.length - 1)
+        setActiveQueryTabId(newTabs[newActiveIdx].id)
+      }
+      return newTabs
+    })
+  }, [activeQueryTabId])
+
+  const startRenaming = useCallback((tabId: string, currentName: string) => {
+    setRenamingTabId(tabId)
+    setRenamingValue(currentName)
+    setTimeout(() => renameInputRef.current?.select(), 0)
+  }, [])
+
+  const finishRenaming = useCallback(() => {
+    if (renamingTabId && renamingValue.trim()) {
+      setQueryTabs(prev => prev.map(tab =>
+        tab.id === renamingTabId ? { ...tab, name: renamingValue.trim() } : tab
+      ))
+    }
+    setRenamingTabId(null)
+    setRenamingValue('')
+  }, [renamingTabId, renamingValue])
+
+  const handleTabKeyDown = useCallback((e: React.KeyboardEvent, tabId: string) => {
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault()
+      closeTab(tabId)
+    }
+  }, [closeTab])
+
+  const handleDragStart = useCallback((e: React.DragEvent, tabId: string) => {
+    setDraggedTabId(tabId)
+    e.dataTransfer.effectAllowed = 'move'
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent, targetTabId: string) => {
+    e.preventDefault()
+    if (!draggedTabId || draggedTabId === targetTabId) return
+    setQueryTabs(prev => {
+      const draggedIdx = prev.findIndex(t => t.id === draggedTabId)
+      const targetIdx = prev.findIndex(t => t.id === targetTabId)
+      if (draggedIdx === -1 || targetIdx === -1) return prev
+      const newTabs = [...prev]
+      const [dragged] = newTabs.splice(draggedIdx, 1)
+      newTabs.splice(targetIdx, 0, dragged)
+      return newTabs
+    })
+    setDraggedTabId(null)
+  }, [draggedTabId])
 
   // Load table schema for autocomplete
   useEffect(() => {
@@ -1006,7 +1199,18 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   return (
     <div className="flex h-full">
       {/* Inner Sidebar */}
-      <InnerSidebar width="220px" disabled={compareEnabled} />
+      <InnerSidebar 
+        width="220px" 
+        disabled={compareEnabled} 
+        privateItems={privateItems}
+        onPrivateItemsChange={setPrivateItems}
+        onPrivateItemClick={(item) => {
+          if (item.sql) {
+            // Update active tab with the selected SQL
+            updateCurrentTabSQL(item.sql)
+          }
+        }}
+      />
 
       {/* Main Editor Area */}
       <div ref={containerRef} className="flex-1 grid min-h-0" style={{ gridTemplateRows: `minmax(220px, 1fr) 8px ${resultHeight}px` }}>
@@ -1087,32 +1291,81 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
 
           {!compareEnabled ? (
             <>
-              {/* Editor Hint Bar */}
-              <div className="px-4 py-1.5 bg-app-sidebar/30 border-b border-app-border/50 flex flex-wrap items-center gap-4 text-xs text-app-text-dim">
-                <div className="flex items-center gap-1.5">
-                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
-                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
-                  <span>Run all</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
-                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⇧</kbd>
-                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
-                  <span>Run selected</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
-                  <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">Space</kbd>
-                  <span>Autocomplete</span>
-                </div>
+              {/* Query Tabs Bar */}
+              <div className="bg-app-sidebar/50 border-b border-app-border flex items-center overflow-x-auto">
+                {queryTabs.map((tab) => (
+                  <div
+                    key={tab.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, tab.id)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, tab.id)}
+                    onClick={() => setActiveQueryTabId(tab.id)}
+                    onDoubleClick={() => startRenaming(tab.id, tab.name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setTabContextMenu({ x: e.clientX, y: e.clientY, tabId: tab.id })
+                    }}
+                    onKeyDown={(e) => handleTabKeyDown(e, tab.id)}
+                    tabIndex={0}
+                    className={`
+                      group flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer border-r border-app-border
+                      transition-colors outline-none focus:ring-1 focus:ring-app-accent/50
+                      ${tab.id === activeQueryTabId 
+                        ? 'bg-app-bg text-app-text' 
+                        : 'text-app-text-dim hover:bg-app-sidebar-hover hover:text-app-text'
+                      }
+                      ${draggedTabId === tab.id ? 'opacity-50' : ''}
+                    `}
+                  >
+                    <FileCode className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
+                    {renamingTabId === tab.id ? (
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        value={renamingValue}
+                        onChange={(e) => setRenamingValue(e.target.value)}
+                        onBlur={finishRenaming}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') finishRenaming()
+                          if (e.key === 'Escape') {
+                            setRenamingTabId(null)
+                            setRenamingValue('')
+                          }
+                          e.stopPropagation()
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-app-bg border border-app-accent rounded px-1 py-0.5 text-xs w-32 outline-none"
+                        autoFocus
+                      />
+                    ) : (
+                      <span className="truncate max-w-[150px]">{tab.name}</span>
+                    )}
+                    {queryTabs.length > 1 && (
+                      <button
+                        onClick={(e) => closeTab(tab.id, e)}
+                        className="opacity-0 group-hover:opacity-100 hover:bg-app-border rounded p-0.5 transition-opacity"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={addNewTab}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs text-app-text-dim hover:text-app-text hover:bg-app-sidebar-hover transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  New
+                </button>
               </div>
               <div className="flex-1 bg-[#0f0f0f] min-h-0">
                 <MonacoEditor
                   height="100%"
                   language="sql"
                   theme="vs-dark"
-                  value={editorState.sql}
-                  onChange={(value) => updateSQL(value || '')}
+                  value={activeQueryTab?.sql || ''}
+                  onChange={(value) => updateCurrentTabSQL(value || '')}
                   onMount={handleEditorDidMount}
                   options={{
                     minimap: { enabled: false },
@@ -1615,6 +1868,24 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
                 </button>
               ))}
               </div>
+
+              {/* Keyboard hints (subtle) */}
+              {!compareEnabled && (
+                <div className="hidden lg:flex items-center gap-3 text-[10px] text-app-text-dim/60">
+                  <span className="flex items-center gap-1">
+                    <kbd className="px-1 py-0.5 bg-app-bg/50 border border-app-border/50 rounded text-[10px]">⌘↵</kbd>
+                    run
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <kbd className="px-1 py-0.5 bg-app-bg/50 border border-app-border/50 rounded text-[10px]">⌘⇧↵</kbd>
+                    selected
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <kbd className="px-1 py-0.5 bg-app-bg/50 border border-app-border/50 rounded text-[10px]">⌘Space</kbd>
+                    autocomplete
+                  </span>
+                </div>
+              )}
 
               <div className="flex items-center gap-2 flex-wrap">
 
@@ -2197,6 +2468,141 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
                     Create Snapshot
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab Context Menu (Right-click save options) */}
+      {tabContextMenu && (
+        <div
+          className="fixed bg-app-sidebar border border-app-border rounded-lg shadow-lg overflow-hidden z-50"
+          style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 text-xs text-app-text-dim border-b border-app-border">Save As...</div>
+          <button
+            onClick={() => {
+              const tab = queryTabs.find(t => t.id === tabContextMenu.tabId)
+              if (tab?.sql) {
+                setSaveModal({ type: 'favorite', sql: tab.sql })
+                setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              }
+              setTabContextMenu(null)
+            }}
+            className="w-full px-3 py-2 text-left text-sm hover:bg-app-sidebar-hover flex items-center gap-2"
+          >
+            <Star className="w-4 h-4 text-yellow-400" />
+            <span>Save as Favorite</span>
+          </button>
+          <button
+            onClick={() => {
+              const tab = queryTabs.find(t => t.id === tabContextMenu.tabId)
+              if (tab?.sql) {
+                setSaveModal({ type: 'template', sql: tab.sql })
+                setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              }
+              setTabContextMenu(null)
+            }}
+            className="w-full px-3 py-2 text-left text-sm hover:bg-app-sidebar-hover flex items-center gap-2"
+          >
+            <FileText className="w-4 h-4 text-blue-400" />
+            <span>Save as Template</span>
+          </button>
+          <button
+            onClick={() => {
+              const tab = queryTabs.find(t => t.id === tabContextMenu.tabId)
+              if (tab?.sql) {
+                setSaveModal({ type: 'private', sql: tab.sql })
+                setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              }
+              setTabContextMenu(null)
+            }}
+            className="w-full px-3 py-2 text-left text-sm hover:bg-app-sidebar-hover flex items-center gap-2"
+          >
+            <Lock className="w-4 h-4 text-purple-400" />
+            <span>Save as Private</span>
+          </button>
+        </div>
+      )}
+
+      {/* Save Modal */}
+      {saveModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setSaveModal(null)}>
+          <div className="bg-app-sidebar border border-app-border rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+              {saveModal.type === 'favorite' && <Star className="w-5 h-5 text-yellow-400" />}
+              {saveModal.type === 'template' && <FileText className="w-5 h-5 text-blue-400" />}
+              {saveModal.type === 'private' && <Lock className="w-5 h-5 text-purple-400" />}
+              Save as {saveModal.type.charAt(0).toUpperCase() + saveModal.type.slice(1)}
+            </h2>
+
+            <div className="mb-4">
+              <label className="block text-sm text-app-text-dim mb-2">Name</label>
+              <input
+                type="text"
+                value={saveItemName}
+                onChange={(e) => setSaveItemName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && saveItemName.trim()) {
+                    handleSaveAs(saveModal.type)
+                  }
+                }}
+                placeholder="Enter a name for this query..."
+                className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-sm focus:outline-none focus:border-app-accent"
+                autoFocus
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm text-app-text-dim mb-2">Preview</label>
+              <div className="bg-app-bg border border-app-border rounded p-2 text-xs font-mono max-h-24 overflow-auto">
+                {saveModal.sql.slice(0, 200)}{saveModal.sql.length > 200 ? '...' : ''}
+              </div>
+            </div>
+
+            {/* Save type selector */}
+            <div className="mb-4">
+              <label className="block text-sm text-app-text-dim mb-2">Save to</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSaveModal({ ...saveModal, type: 'favorite' })}
+                  className={`flex-1 px-3 py-2 text-xs rounded flex items-center justify-center gap-2 transition-colors ${saveModal.type === 'favorite' ? 'bg-yellow-500/20 border border-yellow-500/50 text-yellow-400' : 'bg-app-bg border border-app-border hover:bg-app-sidebar-hover'}`}
+                >
+                  <Star className="w-3.5 h-3.5" />
+                  Favorite
+                </button>
+                <button
+                  onClick={() => setSaveModal({ ...saveModal, type: 'template' })}
+                  className={`flex-1 px-3 py-2 text-xs rounded flex items-center justify-center gap-2 transition-colors ${saveModal.type === 'template' ? 'bg-blue-500/20 border border-blue-500/50 text-blue-400' : 'bg-app-bg border border-app-border hover:bg-app-sidebar-hover'}`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  Template
+                </button>
+                <button
+                  onClick={() => setSaveModal({ ...saveModal, type: 'private' })}
+                  className={`flex-1 px-3 py-2 text-xs rounded flex items-center justify-center gap-2 transition-colors ${saveModal.type === 'private' ? 'bg-purple-500/20 border border-purple-500/50 text-purple-400' : 'bg-app-bg border border-app-border hover:bg-app-sidebar-hover'}`}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  Private
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setSaveModal(null)}
+                className="px-4 py-2 text-sm bg-app-sidebar-active hover:bg-app-sidebar-hover rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSaveAs(saveModal.type)}
+                disabled={!saveItemName.trim()}
+                className="px-4 py-2 text-sm bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors"
+              >
+                Save
               </button>
             </div>
           </div>

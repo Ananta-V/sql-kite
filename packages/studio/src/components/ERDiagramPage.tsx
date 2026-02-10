@@ -12,6 +12,7 @@ import ReactFlow, {
   ConnectionLineType,
   Panel,
   Position,
+  Handle,
   MarkerType
 } from 'reactflow'
 import dagre from 'dagre'
@@ -40,6 +41,7 @@ interface Relation {
   toTable: string
   fromColumn: string
   toColumn: string
+  isInferred?: boolean
 }
 
 interface ERData {
@@ -51,6 +53,16 @@ interface ERData {
 function TableNode({ data }: { data: { label: string; columns: Column[]; foreignKeys: string[] } }) {
   return (
     <div className="bg-app-sidebar border-2 border-app-border rounded-lg shadow-lg min-w-[220px]">
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-transparent !border-0 !w-2 !h-2"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-transparent !border-0 !w-2 !h-2"
+      />
       {/* Table Header */}
       <div className="px-3 py-2 bg-app-bg border-b border-app-border rounded-t-lg">
         <div className="font-semibold text-sm text-app-text">{data.label}</div>
@@ -164,15 +176,23 @@ export default function ERDiagramPage() {
         target: rel.toTable,
         type: 'smoothstep',
         animated: false,
-        style: { stroke: '#6366f1', strokeWidth: 2.5 },
+        style: {
+          stroke: rel.isInferred ? '#94a3b8' : '#6366f1',
+          strokeWidth: 2.5,
+          strokeDasharray: rel.isInferred ? '6 6' : undefined
+        },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: '#6366f1',
+          color: rel.isInferred ? '#94a3b8' : '#6366f1',
           width: 20,
           height: 20
         },
         label: `${rel.fromColumn} → ${rel.toColumn}`,
-        labelStyle: { fontSize: 11, fill: '#e4e4e7', fontWeight: 500 },
+        labelStyle: {
+          fontSize: 11,
+          fill: rel.isInferred ? '#94a3b8' : '#e4e4e7',
+          fontWeight: 500
+        },
         labelBgStyle: { fill: '#18181b', fillOpacity: 0.9, rx: 4, ry: 4 }
       }))
 
@@ -271,6 +291,11 @@ export default function ERDiagramPage() {
           {edges.length === 0 && nodes.length > 0 && (
             <div className="mt-2 text-xs text-yellow-400/80">
               💡 No foreign key relations found. Add FOREIGN KEY constraints to see connections.
+            </div>
+          )}
+          {edges.length > 0 && (
+            <div className="mt-2 text-xs text-app-text-dim">
+              Dashed links are inferred from primary key name matches.
             </div>
           )}
         </Panel>

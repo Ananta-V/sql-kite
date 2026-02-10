@@ -125,7 +125,7 @@ export async function getSchema() {
 }
 
 export async function getERDiagram() {
-  const res = await fetch(`${API_BASE}/schema/er`)
+  const res = await fetch(`${API_BASE}/schema/er?infer=true`)
   if (!res.ok) throw new Error('Failed to fetch ER diagram data')
   return res.json()
 }

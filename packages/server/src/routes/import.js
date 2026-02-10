@@ -1,10 +1,16 @@
-import { existsSync, mkdirSync, copyFileSync, readFileSync, unlinkSync } from 'fs'
-import { join, basename } from 'path'
+import { existsSync, mkdirSync, copyFileSync, readFileSync, unlinkSync, writeFileSync, statSync } from 'fs'
+import { join } from 'path'
+import { spawn } from 'child_process'
+import { dirname } from 'path'
+import { fileURLToPath } from 'url'
 import Database from 'better-sqlite3'
+import { findFreePort } from '../../../cli/src/utils/port-finder.js'
+import { migrateMetaDb } from '../../../cli/src/utils/meta-migration.js'
 
 export default async function importRoutes(fastify, options) {
+  const __dirname = dirname(fileURLToPath(import.meta.url))
   const homeDir = process.env.HOME || process.env.USERPROFILE
-  const projectsRoot = join(homeDir, '.localdb', 'projects')
+  const projectsRoot = join(homeDir, '.localdb', 'runtime')
   const sessionFile = join(homeDir, '.localdb', 'import-pending.json')
 
   // Get pending import session
@@ -49,69 +55,38 @@ export default async function importRoutes(fastify, options) {
 
       // Create project directories
       mkdirSync(projectPath, { recursive: true })
-      mkdirSync(join(projectPath, 'db', 'branches'), { recursive: true })
-      mkdirSync(join(projectPath, 'db', 'snapshots'), { recursive: true })
       mkdirSync(join(projectPath, 'migrations'), { recursive: true })
+      mkdirSync(join(projectPath, 'snapshots'), { recursive: true })
       mkdirSync(join(projectPath, '.studio'), { recursive: true })
       mkdirSync(join(projectPath, '.studio', 'snapshots'), { recursive: true })
       mkdirSync(join(projectPath, '.studio', 'locks'), { recursive: true })
 
-      // Create meta.db
+      // Create config.json
+      const config = {
+        name: projectName,
+        created_at: new Date().toISOString(),
+        version: '1.0.0'
+      }
+      writeFileSync(
+        join(projectPath, 'config.json'),
+        JSON.stringify(config, null, 2)
+      )
+
+      // Initialize meta.db using the shared migration
       const metaDbPath = join(projectPath, '.studio', 'meta.db')
+      migrateMetaDb(metaDbPath)
+
+      // Update main branch description and ensure current branch
       const metaDb = new Database(metaDbPath)
-
-      // Initialize meta.db tables
-      metaDb.exec(`
-        CREATE TABLE IF NOT EXISTS projects (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS branches (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL UNIQUE,
-          description TEXT,
-          created_from TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          last_modified DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS migrations (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          filename TEXT NOT NULL,
-          checksum TEXT,
-          branch TEXT NOT NULL DEFAULT 'main',
-          applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS events (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          type TEXT NOT NULL,
-          branch TEXT NOT NULL DEFAULT 'main',
-          description TEXT,
-          metadata TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS snapshots (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          snapshot_id TEXT NOT NULL UNIQUE,
-          branch TEXT NOT NULL,
-          description TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-      `)
-
-      // Insert project record
-      metaDb.prepare('INSERT INTO projects (name) VALUES (?)').run(projectName)
-
-      // Insert main branch
       metaDb.prepare(`
-        INSERT INTO branches (name, description, created_from) 
-        VALUES ('main', 'Imported database baseline', NULL)
+        UPDATE branches
+        SET description = 'Imported database baseline'
+        WHERE name = 'main'
       `).run()
-
+      metaDb.prepare(`
+        INSERT OR REPLACE INTO settings (key, value)
+        VALUES ('current_branch', 'main')
+      `).run()
       metaDb.close()
 
       return { success: true, projectPath }
@@ -127,13 +102,13 @@ export default async function importRoutes(fastify, options) {
 
     try {
       const projectPath = join(projectsRoot, projectName)
-      const targetPath = join(projectPath, 'db', 'branches', 'main.db')
+      const targetPath = join(projectPath, 'db.sqlite')
 
       if (importMode === 'copy') {
         // Step 1: Open source DB and checkpoint WAL
         let sourceDb
         try {
-          sourceDb = new Database(sourcePath)
+          sourceDb = new Database(sourcePath, { fileMustExist: true })
           
           // Force WAL checkpoint to ensure all data is in main DB file
           sourceDb.pragma('wal_checkpoint(FULL)')
@@ -182,18 +157,27 @@ export default async function importRoutes(fastify, options) {
         }
 
       } else if (importMode === 'link') {
-        // TODO: Implement symlink mode (advanced)
-        return reply.code(400).send({ error: 'Link mode not yet implemented' })
+        if (!existsSync(sourcePath)) {
+          return reply.code(400).send({ error: 'Source database not found' })
+        }
       }
 
-      // Log event in meta.db
+      // Update main branch db_file
       const metaDbPath = join(projectPath, '.studio', 'meta.db')
       const metaDb = new Database(metaDbPath)
-      
+
+      const dbFile = importMode === 'link' ? sourcePath : 'db.sqlite'
       metaDb.prepare(`
-        INSERT INTO events (type, branch, description, metadata)
-        VALUES ('database_imported', 'main', 'Database imported from external source', ?)
-      `).run(JSON.stringify({ sourcePath, importMode }))
+        UPDATE branches
+        SET db_file = ?
+        WHERE name = 'main'
+      `).run(dbFile)
+      
+      // Log event in meta.db
+      metaDb.prepare(`
+        INSERT INTO events (branch, type, data)
+        VALUES ('main', 'database_imported', ?)
+      `).run(JSON.stringify({ sourcePath, importMode, db_file: dbFile }))
 
       metaDb.close()
 
@@ -210,11 +194,22 @@ export default async function importRoutes(fastify, options) {
 
     try {
       const projectPath = join(projectsRoot, projectName)
-      const sourceDbPath = join(projectPath, 'db', 'branches', 'main.db')
+      const metaDbPath = join(projectPath, '.studio', 'meta.db')
+      const metaDb = new Database(metaDbPath)
+      const branchInfo = metaDb.prepare(`
+        SELECT db_file FROM branches WHERE name = 'main'
+      `).get()
+
+      if (!branchInfo) {
+        metaDb.close()
+        return reply.code(404).send({ error: 'Main branch not found' })
+      }
+
+      const sourceDbPath = join(projectPath, branchInfo.db_file)
       
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-      const snapshotId = `imported-baseline-${timestamp}`
-      const snapshotPath = join(projectPath, '.studio', 'snapshots', `${snapshotId}.snapshot.db`)
+      const snapshotFilename = `imported-baseline-${timestamp}.db`
+      const snapshotPath = join(projectPath, 'snapshots', snapshotFilename)
 
       // Copy database to snapshot
       let sourceDb
@@ -228,24 +223,21 @@ export default async function importRoutes(fastify, options) {
       }
 
       copyFileSync(sourceDbPath, snapshotPath)
-
-      // Record snapshot in meta.db
-      const metaDbPath = join(projectPath, '.studio', 'meta.db')
-      const metaDb = new Database(metaDbPath)
+      const stats = statSync(snapshotPath)
 
       metaDb.prepare(`
-        INSERT INTO snapshots (snapshot_id, branch, description)
-        VALUES (?, 'main', 'Baseline snapshot created during import')
-      `).run(snapshotId)
+        INSERT INTO snapshots (branch, filename, name, size, description)
+        VALUES ('main', ?, 'Imported Baseline', ?, 'Baseline snapshot created during import')
+      `).run(snapshotFilename, stats.size)
 
       metaDb.prepare(`
-        INSERT INTO events (type, branch, description, metadata)
-        VALUES ('snapshot_created', 'main', 'Baseline snapshot created', ?)
-      `).run(JSON.stringify({ snapshot_id: snapshotId }))
+        INSERT INTO events (branch, type, data)
+        VALUES ('main', 'snapshot_created', ?)
+      `).run(JSON.stringify({ filename: snapshotFilename }))
 
       metaDb.close()
 
-      return { success: true, snapshotId }
+      return { success: true, snapshotId: snapshotFilename }
     } catch (error) {
       fastify.log.error(error)
       return reply.code(500).send({ error: error.message })
@@ -263,19 +255,64 @@ export default async function importRoutes(fastify, options) {
 
       // Create baseline migration marker (NOT a SQL file)
       metaDb.prepare(`
-        INSERT INTO migrations (filename, checksum, branch, applied_at)
-        VALUES ('baseline', 'imported', 'main', datetime('now'))
+        INSERT INTO migrations (branch, filename, applied_at)
+        VALUES ('main', 'baseline', datetime('now'))
       `).run()
 
       // Log finalization event
       metaDb.prepare(`
-        INSERT INTO events (type, branch, description)
-        VALUES ('import_completed', 'main', 'Database import completed successfully')
-      `).run()
+        INSERT INTO events (branch, type, data)
+        VALUES ('main', 'import_completed', ?)
+      `).run(JSON.stringify({ completed_at: new Date().toISOString() }))
 
       metaDb.close()
 
-      return { success: true }
+      // Create lock file for main branch
+      const locksDir = join(projectPath, '.studio', 'locks')
+      if (!existsSync(locksDir)) {
+        mkdirSync(locksDir, { recursive: true })
+      }
+      const lockPath = join(locksDir, 'main.lock')
+      if (!existsSync(lockPath)) {
+        writeFileSync(
+          lockPath,
+          JSON.stringify({
+            branch: 'main',
+            created_at: new Date().toISOString(),
+            reason: 'import'
+          }, null, 2)
+        )
+      }
+
+      // Start project server automatically
+      const serverInfoPath = join(projectPath, '.studio', 'server.json')
+      if (existsSync(serverInfoPath)) {
+        const serverInfo = JSON.parse(readFileSync(serverInfoPath, 'utf-8'))
+        return { success: true, server: { running: true, port: serverInfo.port } }
+      }
+
+      const port = await findFreePort(3000, projectName)
+      const serverPath = join(__dirname, '..', 'index.js')
+      const serverProcess = spawn('node', [serverPath], {
+        detached: true,
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          PROJECT_NAME: projectName,
+          PROJECT_PATH: projectPath,
+          PORT: port.toString(),
+          IMPORT_MODE: 'false'
+        }
+      })
+      serverProcess.unref()
+
+      writeFileSync(serverInfoPath, JSON.stringify({
+        pid: serverProcess.pid,
+        port,
+        started_at: new Date().toISOString()
+      }, null, 2))
+
+      return { success: true, server: { running: true, port } }
     } catch (error) {
       fastify.log.error(error)
       return reply.code(500).send({ error: error.message })

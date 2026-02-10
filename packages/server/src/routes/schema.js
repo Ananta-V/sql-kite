@@ -110,6 +110,7 @@ export default async function schemaRoutes(fastify, options) {
     const db = fastify.getUserDb();
 
     try {
+      const inferRelations = String(request.query?.infer || '').toLowerCase() === 'true'
       // Get all tables (excluding SQLite internal tables)
       const tables = db.prepare(`
         SELECT name 
@@ -122,6 +123,7 @@ export default async function schemaRoutes(fastify, options) {
 
       const tablesWithColumns = [];
       const relations = [];
+      const primaryKeysByTable = {};
 
       for (const table of tables) {
         // Get column info
@@ -144,6 +146,10 @@ export default async function schemaRoutes(fastify, options) {
           columns: formattedColumns
         });
 
+        primaryKeysByTable[table.name] = formattedColumns
+          .filter(col => col.pk)
+          .map(col => col.name);
+
         // Map foreign keys to relations
         for (const fk of foreignKeys) {
           relations.push({
@@ -154,6 +160,38 @@ export default async function schemaRoutes(fastify, options) {
             fromColumn: fk.from,
             toColumn: fk.to
           });
+        }
+      }
+
+      const relationKeySet = new Set(
+        relations.map(rel => `${rel.fromTable}|${rel.fromColumn}|${rel.toTable}|${rel.toColumn}`)
+      );
+
+      if (inferRelations || relations.length === 0) {
+        for (const table of tablesWithColumns) {
+          for (const column of table.columns) {
+            if (column.pk) continue;
+
+            for (const [targetTable, pkColumns] of Object.entries(primaryKeysByTable)) {
+              if (targetTable === table.name) continue;
+
+              if (pkColumns.includes(column.name)) {
+                const key = `${table.name}|${column.name}|${targetTable}|${column.name}`;
+                if (relationKeySet.has(key)) continue;
+
+                relations.push({
+                  from: `${table.name}.${column.name}`,
+                  to: `${targetTable}.${column.name}`,
+                  fromTable: table.name,
+                  toTable: targetTable,
+                  fromColumn: column.name,
+                  toColumn: column.name,
+                  isInferred: true
+                });
+                relationKeySet.add(key);
+              }
+            }
+          }
         }
       }
 

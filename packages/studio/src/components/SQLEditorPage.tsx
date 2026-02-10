@@ -48,6 +48,9 @@ export default function SQLEditorPage() {
   const [lastQueryType, setLastQueryType] = useState<string>('unknown')
   const [lastExecutedSQL, setLastExecutedSQL] = useState<string>('')
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const isResizingRef = useRef(false)
+  const [resultHeight, setResultHeight] = useState(320)
   
   const completionProviderRef = useRef<SQLCompletionProvider | null>(null)
   const hoverProviderRef = useRef<SQLHoverProvider | null>(null)
@@ -72,6 +75,36 @@ export default function SQLEditorPage() {
       return () => document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [showExportMenu])
+
+  useEffect(() => {
+    function handleMove(event: MouseEvent | TouchEvent) {
+      if (!isResizingRef.current || !containerRef.current) return
+
+      const rect = containerRef.current.getBoundingClientRect()
+      const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY
+      const maxHeight = Math.max(220, rect.height - 220)
+      const nextHeight = Math.min(maxHeight, Math.max(160, rect.bottom - clientY))
+      setResultHeight(nextHeight)
+    }
+
+    function stopResize() {
+      if (!isResizingRef.current) return
+      isResizingRef.current = false
+      document.body.style.cursor = ''
+    }
+
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', stopResize)
+    window.addEventListener('touchmove', handleMove)
+    window.addEventListener('touchend', stopResize)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', stopResize)
+      window.removeEventListener('touchmove', handleMove)
+      window.removeEventListener('touchend', stopResize)
+    }
+  }, [])
 
   async function loadSchemaForAutocomplete() {
     try {
@@ -405,11 +438,11 @@ export default function SQLEditorPage() {
       <InnerSidebar width="220px" />
 
       {/* Main Editor Area */}
-      <div className="flex-1 flex flex-col">
+      <div ref={containerRef} className="flex-1 grid min-h-0" style={{ gridTemplateRows: `minmax(220px, 1fr) 8px ${resultHeight}px` }}>
         {/* Editor */}
-        <div className="flex-1 flex flex-col border-b border-app-border">
+        <div className="flex flex-col border-b border-app-border min-h-0">
           {/* Editor Hint Bar */}
-          <div className="px-4 py-1.5 bg-app-sidebar/30 border-b border-app-border/50 flex items-center gap-4 text-xs text-app-text-dim">
+          <div className="px-4 py-1.5 bg-app-sidebar/30 border-b border-app-border/50 flex flex-wrap items-center gap-4 text-xs text-app-text-dim">
             <div className="flex items-center gap-1.5">
               <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">⌘</kbd>
               <kbd className="px-1.5 py-0.5 bg-app-bg border border-app-border rounded text-xs">↵</kbd>
@@ -427,7 +460,7 @@ export default function SQLEditorPage() {
               <span>Autocomplete</span>
             </div>
           </div>
-          <div className="flex-1 bg-[#0f0f0f]">
+          <div className="flex-1 bg-[#0f0f0f] min-h-0">
             <MonacoEditor
               height="100%"
               language="sql"
@@ -471,11 +504,27 @@ export default function SQLEditorPage() {
           </div>
         </div>
 
+        {/* Resize Handle */}
+        <div
+          onMouseDown={() => {
+            isResizingRef.current = true
+            document.body.style.cursor = 'row-resize'
+          }}
+          onTouchStart={() => {
+            isResizingRef.current = true
+            document.body.style.cursor = 'row-resize'
+          }}
+          className="bg-app-sidebar/40 border-y border-app-border cursor-row-resize flex items-center justify-center"
+        >
+          <div className="w-10 h-1 rounded-full bg-app-border" />
+        </div>
+
         {/* Results Panel */}
-        <div className="h-96 flex flex-col bg-app-panel border-t border-app-panel-border">
+        <div className="flex flex-col bg-app-panel border-t border-app-panel-border overflow-hidden min-h-0">
           {/* Tabs + Actions */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-app-panel-border bg-app-sidebar/30 flex-shrink-0">
-            <div className="flex gap-4">
+          <div className="px-4 py-2.5 border-b border-app-panel-border bg-app-sidebar/30 flex-shrink-0">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex gap-4">
               {(['result', 'errors', 'info'] as const).map((tab) => (
                 <button
                   key={tab}
@@ -491,12 +540,9 @@ export default function SQLEditorPage() {
                   {tab}
                 </button>
               ))}
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="text-xs text-app-text-dim mr-2">
-                ⌘↵ Run | ⌘⇧↵ Run Selected | ⌘⇧F Format
               </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
 
               {/* Export Dropdown */}
               <div className="relative" ref={exportMenuRef}>
@@ -570,8 +616,9 @@ export default function SQLEditorPage() {
                 disabled={loading}
                 className="px-4 py-1.5 text-xs bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors font-medium"
               >
-                {loading ? 'Running...' : 'Run selected'}
+                {loading ? 'Running...' : 'Run'}
               </button>
+            </div>
             </div>
           </div>
 

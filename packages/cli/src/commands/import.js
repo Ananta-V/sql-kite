@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 
 import { existsSync, statSync, accessSync, constants, writeFileSync, mkdirSync } from 'fs'
-import { resolve, extname, basename, join } from 'path'
+import { resolve, extname, basename, join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import Database from 'better-sqlite3'
 import chalk from 'chalk'
-import { exec } from 'child_process'
+import { spawn } from 'child_process'
+import http from 'http'
+import open from 'open'
+import { findFreePort } from '../utils/port-finder.js'
+import { ensureLocalDbDirs, LOGS_DIR } from '../utils/paths.js'
 
-export default function importCommand(dbPath) {
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+export default async function importCommand(dbPath) {
+  ensureLocalDbDirs()
   if (!dbPath) {
     console.error(chalk.red('✗ Error: Database path is required'))
     console.log(chalk.dim('Usage: localdb import <path-to-database>'))
@@ -146,14 +154,127 @@ export default function importCommand(dbPath) {
 
   writeFileSync(sessionFile, JSON.stringify(importSession, null, 2))
 
-  const importUrl = 'http://localhost:3000'
+  const defaultPort = 3000
+  const importUrl = (port) => `http://localhost:${port}`
+
+  async function getImportServerPort() {
+    try {
+      const mode = await new Promise((resolve, reject) => {
+        const req = http.get(`http://localhost:${defaultPort}/api/project`, (res) => {
+          let raw = ''
+          res.on('data', (chunk) => { raw += chunk })
+          res.on('end', () => {
+            try {
+              const data = JSON.parse(raw)
+              resolve(data.mode || 'project')
+            } catch (e) {
+              resolve('project')
+            }
+          })
+        })
+        req.on('error', reject)
+        req.setTimeout(500, () => {
+          req.destroy()
+          reject(new Error('Timeout'))
+        })
+      })
+
+      if (mode === 'import') {
+        return { port: defaultPort, alreadyRunning: true }
+      }
+    } catch (e) {
+      // Not running on default port
+    }
+
+    const port = await findFreePort(defaultPort)
+    return { port, alreadyRunning: false }
+  }
+
+  async function waitForImportServer(port, maxAttempts = 60) {
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        await new Promise((resolve, reject) => {
+          const req = http.get(`http://localhost:${port}/api/project`, (res) => {
+            if (res.statusCode === 200) {
+              resolve()
+            } else {
+              reject(new Error(`Server returned ${res.statusCode}`))
+            }
+          })
+          req.on('error', reject)
+          req.setTimeout(1000, () => {
+            req.destroy()
+            reject(new Error('Timeout'))
+          })
+        })
+        return true
+      } catch (e) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    }
+    return false
+  }
 
   console.log(chalk.bold('Import session ready!'))
   console.log('')
   console.log(chalk.cyan('→ Next steps:'))
-  console.log(chalk.dim(`  1. Run: `) + chalk.cyan('localdb import-server'))
-  console.log(chalk.dim(`  2. Open: `) + chalk.cyan(importUrl))
-  console.log(chalk.dim(`  3. Complete the import wizard`))
+  console.log(chalk.dim(`  1. Launching import Studio...`))
+  console.log(chalk.dim(`  2. Complete the import wizard`))
   console.log('')
   console.log(chalk.dim(`Session saved to: ${sessionFile}`))
+
+  const studioPath = join(__dirname, '../../../studio/out')
+  if (!existsSync(studioPath)) {
+    console.log(chalk.red(`\n✗ Studio UI not built yet`))
+    console.log(chalk.dim(`   Run: ${chalk.cyan(`cd packages/studio && npm run build`)}`))
+    return
+  }
+
+  try {
+    const { port, alreadyRunning } = await getImportServerPort()
+
+    if (!alreadyRunning) {
+      const serverPath = join(__dirname, '../../../server/src/index.js')
+      const logPath = join(LOGS_DIR, `import-server-${Date.now()}.log`)
+      const out = []
+      const serverProcess = spawn('node', [serverPath], {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          PORT: port.toString(),
+          IMPORT_MODE: 'true'
+        }
+      })
+
+      serverProcess.stdout.on('data', (chunk) => {
+        out.push(chunk.toString())
+      })
+
+      serverProcess.stderr.on('data', (chunk) => {
+        out.push(chunk.toString())
+      })
+
+      serverProcess.unref()
+
+      const ready = await waitForImportServer(port)
+      if (!ready) {
+        if (out.length > 0) {
+          writeFileSync(logPath, out.join(''))
+          console.log(chalk.red('✗ Import server failed to start in time'))
+          console.log(chalk.dim(`   Log: ${logPath}`))
+        } else {
+          console.log(chalk.red('✗ Import server failed to start in time'))
+          console.log(chalk.dim('   No logs captured. The server may not have started.'))
+        }
+        return
+      }
+    }
+
+    console.log(chalk.cyan(`Opening ${importUrl(port)}...`))
+    await open(importUrl(port))
+  } catch (error) {
+    console.log(chalk.red('✗ Failed to launch import Studio'))
+    console.log(chalk.dim(error.message))
+  }
 }

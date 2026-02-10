@@ -92,6 +92,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   const [compareLoading, setCompareLoading] = useState(false)
   const [compareChanges, setCompareChanges] = useState<CompareChanges | null>(null)
   const [compareSqlPreview, setCompareSqlPreview] = useState('')
+  const [compareSqlPreviewReverse, setCompareSqlPreviewReverse] = useState('')
   const [compareSqlA, setCompareSqlA] = useState('SELECT * FROM sqlite_master;')
   const [compareSqlB, setCompareSqlB] = useState('SELECT * FROM sqlite_master;')
   const [compareActiveTerminal, setCompareActiveTerminal] = useState<'a' | 'b'>('a')
@@ -126,6 +127,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
       setCompareTab('change')
       setCompareChanges(null)
       setCompareSqlPreview('')
+      setCompareSqlPreviewReverse('')
       setCompareErrors({ a: null, b: null })
       setCompareResults({ a: null, b: null })
       setCompareErrorMessage(null)
@@ -161,7 +163,9 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     if (compareBranches.a === compareBranches.b) return
 
     const preview = buildSqlPreview(compareChanges)
+    const previewReverse = buildSqlPreviewReverse(compareChanges)
     setCompareSqlPreview(preview)
+    setCompareSqlPreviewReverse(previewReverse)
   }, [compareEnabled, compareBranches, compareChanges])
 
   useEffect(() => {
@@ -319,6 +323,62 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     return lines.join('\n')
   }
 
+  // Build reverse SQL: B → A (undo changes from B back to A)
+  function buildSqlPreviewReverse(changes: CompareChanges | null) {
+    if (!changes) return ''
+
+    const lines: string[] = []
+
+    // Reverse of added tables → DROP them
+    changes.addedTables.forEach((table) => {
+      lines.push(`DROP TABLE IF EXISTS "${table.name}";`)
+    })
+
+    // Reverse of removed tables → need CREATE (but we don't have SQL for it from B context)
+    changes.removedTables.forEach((table) => {
+      lines.push(table.sql.endsWith(';') ? table.sql : `${table.sql};`)
+    })
+
+    // Reverse of added indexes → DROP them
+    changes.addedIndexes.forEach((index) => {
+      lines.push(`DROP INDEX IF EXISTS "${index.name}";`)
+    })
+
+    // Reverse of removed indexes → CREATE them
+    changes.removedIndexes.forEach((index) => {
+      lines.push(index.sql.endsWith(';') ? index.sql : `${index.sql};`)
+    })
+
+    // Reverse of added triggers → DROP them
+    changes.addedTriggers.forEach((trigger) => {
+      lines.push(`DROP TRIGGER IF EXISTS "${trigger.name}";`)
+    })
+
+    // Reverse of removed triggers → CREATE them
+    changes.removedTriggers.forEach((trigger) => {
+      lines.push(trigger.sql.endsWith(';') ? trigger.sql : `${trigger.sql};`)
+    })
+
+    changes.tableChanges.forEach((change) => {
+      // Reverse of added columns → remove them (not directly supported in SQLite)
+      change.addedColumns.forEach((column) => {
+        lines.push(`-- Column to remove: ${change.table}.${column.name}`)
+      })
+
+      // Reverse of removed columns → add them back
+      change.removedColumns.forEach((column) => {
+        lines.push(`ALTER TABLE "${change.table}" ADD COLUMN "${column.name}" ${column.type};`)
+      })
+
+      // Reverse of modified columns
+      change.modifiedColumns.forEach((column) => {
+        lines.push(`-- Column modified: ${change.table}.${column.name} ${column.toType} -> ${column.fromType}`)
+      })
+    })
+
+    return lines.join('\n')
+  }
+
   async function loadCompareChanges() {
     if (compareBranches.a === compareBranches.b) {
       setCompareErrorMessage('Select two different branches to compare')
@@ -451,8 +511,18 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     }
   }
 
-  function hasForbiddenCompareSql(sql: string) {
-    return /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE|ATTACH)\b/i.test(sql)
+  // Compare Mode shows truth, not power.
+  // All actions are read-only and branch-explicit.
+  function hasForbiddenCompareSql(sql: string): boolean {
+    // Blocked operations in Compare Mode (STRICT)
+    // INSERT, UPDATE, DELETE, ALTER, DROP, CREATE, VACUUM
+    // Any transaction (BEGIN, COMMIT, ROLLBACK)
+    const forbidden = /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE|ATTACH|DETACH|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX)\b/i
+    return forbidden.test(sql)
+  }
+
+  function getCompareErrorMessage(): string {
+    return 'Compare Mode is read-only. Switch off Compare to modify data.'
   }
 
   function getCompareSqlForTerminal(target: 'a' | 'b') {
@@ -501,7 +571,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     if (!branch) return { skipped: true }
 
     if (hasForbiddenCompareSql(sql)) {
-      return { error: { message: 'Write operations are disabled in Compare Mode' }, target }
+      return { error: { message: getCompareErrorMessage() }, target }
     }
 
     const startTime = performance.now()
@@ -1088,9 +1158,9 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
               )}
 
               {compareTab === 'change' && (
-                <div className="h-full overflow-auto p-4 space-y-4">
+                <div className="h-full overflow-auto">
                   {compareLoading ? (
-                    <div className="text-xs text-app-text-dim">Loading changes...</div>
+                    <div className="text-xs text-app-text-dim p-4">Loading changes...</div>
                   ) : compareChanges ? (
                     (() => {
                       const hasChanges =
@@ -1104,185 +1174,329 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
 
                       if (!hasChanges) {
                         return (
-                          <div className="text-sm text-app-text-dim">No differences between selected branches</div>
+                          <div className="text-sm text-app-text-dim p-4">No differences between selected branches</div>
                         )
                       }
 
+                      // Helper to render a clickable item that navigates to Manual Inspect
+                      const handleTableClick = (tableName: string) => {
+                        setCompareSqlA(`SELECT * FROM sqlite_master WHERE type='table' AND name='${tableName}';`)
+                        setCompareSqlB(`SELECT * FROM sqlite_master WHERE type='table' AND name='${tableName}';`)
+                        setCompareTab('manual')
+                      }
+
+                      const handleColumnClick = (tableName: string) => {
+                        setCompareSqlA(`PRAGMA table_info("${tableName}");`)
+                        setCompareSqlB(`PRAGMA table_info("${tableName}");`)
+                        setCompareTab('manual')
+                      }
+
                       return (
-                        <div className="space-y-5">
-                          {compareChanges.addedTables.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Tables Added</h4>
-                              <div className="space-y-1">
-                                {compareChanges.addedTables.map((table) => (
-                                  <button
-                                    key={table.name}
-                                    onClick={() => setCompareTab('preview')}
-                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
-                                  >
-                                    + {table.name}
-                                  </button>
-                                ))}
-                              </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 h-full gap-px bg-app-border">
+                          {/* Branch A Panel */}
+                          <div className="bg-app-bg flex flex-col min-h-0">
+                            <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center gap-2">
+                              <GitBranch className="w-3.5 h-3.5 text-app-text-dim" />
+                              <span className="text-xs font-semibold text-app-text">{compareBranches.a || 'Branch A'}</span>
                             </div>
-                          )}
+                            <div className="flex-1 overflow-auto p-4 space-y-4">
+                              {/* Tables (+) in A */}
+                              {compareChanges.removedTables.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-green-400 mb-2">Tables (+)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.removedTables.map((table) => (
+                                      <button
+                                        key={table.name}
+                                        onClick={() => handleTableClick(table.name)}
+                                        className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                      >
+                                        <span className="text-green-400">+</span> {table.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
 
-                          {compareChanges.removedTables.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Tables Removed</h4>
-                              <div className="space-y-1">
-                                {compareChanges.removedTables.map((table) => (
-                                  <button
-                                    key={table.name}
-                                    onClick={() => setCompareTab('preview')}
-                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
-                                  >
-                                    - {table.name}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                              {/* Tables (−) in A */}
+                              {compareChanges.addedTables.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-red-400 mb-2">Tables (−)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.addedTables.map((table) => (
+                                      <button
+                                        key={table.name}
+                                        onClick={() => handleTableClick(table.name)}
+                                        className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover opacity-60"
+                                      >
+                                        <span className="text-red-400">−</span> {table.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
 
-                          {compareChanges.tableChanges.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Table Changes</h4>
-                              <div className="space-y-2">
-                                {compareChanges.tableChanges.map((change) => (
-                                  <button
-                                    key={change.table}
-                                    onClick={() => setCompareTab('preview')}
-                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
-                                  >
-                                    <div className="font-medium text-app-text mb-1">{change.table}</div>
-                                    <div className="space-y-1 text-xs text-app-text-dim">
-                                      {change.addedColumns.map((col) => (
-                                        <div key={`added-${col.name}`}>+ {col.name} ({col.type})</div>
-                                      ))}
-                                      {change.removedColumns.map((col) => (
-                                        <div key={`removed-${col.name}`}>- {col.name}</div>
-                                      ))}
-                                      {change.modifiedColumns.map((col) => (
-                                        <div key={`modified-${col.name}`}>~ {col.name} ({col.fromType} → {col.toType})</div>
-                                      ))}
-                                      {change.rowCounts && (
-                                        <div>≈ rows: {change.rowCounts.a} → {change.rowCounts.b}</div>
-                                      )}
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                              {/* Table changes */}
+                              {compareChanges.tableChanges.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-app-text-dim mb-2">Table changes</h4>
+                                  <div className="space-y-2">
+                                    {compareChanges.tableChanges.map((change) => (
+                                      <button
+                                        key={change.table}
+                                        onClick={() => handleColumnClick(change.table)}
+                                        className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                      >
+                                        <div className="font-medium text-app-text mb-1">{change.table}</div>
+                                        <div className="space-y-1 text-xs text-app-text-dim">
+                                          {change.removedColumns.map((col) => (
+                                            <div key={`removed-${col.name}`}><span className="text-green-400">+</span> {col.name} ({col.type})</div>
+                                          ))}
+                                          {change.addedColumns.map((col) => (
+                                            <div key={`added-${col.name}`}><span className="text-red-400">−</span> {col.name}</div>
+                                          ))}
+                                          {change.modifiedColumns.map((col) => (
+                                            <div key={`modified-${col.name}`}><span className="text-yellow-400">≈</span> {col.name} ({col.fromType})</div>
+                                          ))}
+                                          {change.rowCounts && (
+                                            <div className="text-yellow-400">≈ rows: {change.rowCounts.a}</div>
+                                          )}
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
 
-                          {compareChanges.addedIndexes.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Indexes Added</h4>
-                              <div className="space-y-1">
-                                {compareChanges.addedIndexes.map((index) => (
-                                  <button
-                                    key={index.name}
-                                    onClick={() => setCompareTab('preview')}
-                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
-                                  >
-                                    + {index.name}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                              {/* Indexes (+) */}
+                              {compareChanges.removedIndexes.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-green-400 mb-2">Indexes (+)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.removedIndexes.map((index) => (
+                                      <div key={index.name} className="px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded">
+                                        <span className="text-green-400">+</span> {index.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
 
-                          {compareChanges.removedIndexes.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Indexes Removed</h4>
-                              <div className="space-y-1">
-                                {compareChanges.removedIndexes.map((index) => (
-                                  <button
-                                    key={index.name}
-                                    onClick={() => setCompareTab('preview')}
-                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
-                                  >
-                                    - {index.name}
-                                  </button>
-                                ))}
-                              </div>
+                              {/* Triggers (+) */}
+                              {compareChanges.removedTriggers.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-green-400 mb-2">Triggers (+)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.removedTriggers.map((trigger) => (
+                                      <div key={trigger.name} className="px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded">
+                                        <span className="text-green-400">+</span> {trigger.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
 
-                          {compareChanges.addedTriggers.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Triggers Added</h4>
-                              <div className="space-y-1">
-                                {compareChanges.addedTriggers.map((trigger) => (
-                                  <button
-                                    key={trigger.name}
-                                    onClick={() => setCompareTab('preview')}
-                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
-                                  >
-                                    + {trigger.name}
-                                  </button>
-                                ))}
-                              </div>
+                          {/* Branch B Panel */}
+                          <div className="bg-app-bg flex flex-col min-h-0">
+                            <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center gap-2">
+                              <GitBranch className="w-3.5 h-3.5 text-app-text-dim" />
+                              <span className="text-xs font-semibold text-app-text">{compareBranches.b || 'Branch B'}</span>
                             </div>
-                          )}
+                            <div className="flex-1 overflow-auto p-4 space-y-4">
+                              {/* Tables (+) in B */}
+                              {compareChanges.addedTables.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-green-400 mb-2">Tables (+)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.addedTables.map((table) => (
+                                      <button
+                                        key={table.name}
+                                        onClick={() => handleTableClick(table.name)}
+                                        className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                      >
+                                        <span className="text-green-400">+</span> {table.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
 
-                          {compareChanges.removedTriggers.length > 0 && (
-                            <div>
-                              <h4 className="text-xs font-semibold text-app-text-dim mb-2">Triggers Removed</h4>
-                              <div className="space-y-1">
-                                {compareChanges.removedTriggers.map((trigger) => (
-                                  <button
-                                    key={trigger.name}
-                                    onClick={() => setCompareTab('preview')}
-                                    className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
-                                  >
-                                    - {trigger.name}
-                                  </button>
-                                ))}
-                              </div>
+                              {/* Tables (−) in B */}
+                              {compareChanges.removedTables.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-red-400 mb-2">Tables (−)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.removedTables.map((table) => (
+                                      <button
+                                        key={table.name}
+                                        onClick={() => handleTableClick(table.name)}
+                                        className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover opacity-60"
+                                      >
+                                        <span className="text-red-400">−</span> {table.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Table changes */}
+                              {compareChanges.tableChanges.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-app-text-dim mb-2">Table changes</h4>
+                                  <div className="space-y-2">
+                                    {compareChanges.tableChanges.map((change) => (
+                                      <button
+                                        key={change.table}
+                                        onClick={() => handleColumnClick(change.table)}
+                                        className="w-full text-left px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded hover:bg-app-sidebar-hover"
+                                      >
+                                        <div className="font-medium text-app-text mb-1">{change.table}</div>
+                                        <div className="space-y-1 text-xs text-app-text-dim">
+                                          {change.addedColumns.map((col) => (
+                                            <div key={`added-${col.name}`}><span className="text-green-400">+</span> {col.name} ({col.type})</div>
+                                          ))}
+                                          {change.removedColumns.map((col) => (
+                                            <div key={`removed-${col.name}`}><span className="text-red-400">−</span> {col.name}</div>
+                                          ))}
+                                          {change.modifiedColumns.map((col) => (
+                                            <div key={`modified-${col.name}`}><span className="text-yellow-400">≈</span> {col.name} ({col.toType})</div>
+                                          ))}
+                                          {change.rowCounts && (
+                                            <div className="text-yellow-400">≈ rows: {change.rowCounts.b}</div>
+                                          )}
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Indexes (+) */}
+                              {compareChanges.addedIndexes.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-green-400 mb-2">Indexes (+)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.addedIndexes.map((index) => (
+                                      <div key={index.name} className="px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded">
+                                        <span className="text-green-400">+</span> {index.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Triggers (+) */}
+                              {compareChanges.addedTriggers.length > 0 && (
+                                <div>
+                                  <h4 className="text-xs font-semibold text-green-400 mb-2">Triggers (+)</h4>
+                                  <div className="space-y-1">
+                                    {compareChanges.addedTriggers.map((trigger) => (
+                                      <div key={trigger.name} className="px-3 py-2 text-sm bg-app-sidebar border border-app-border rounded">
+                                        <span className="text-green-400">+</span> {trigger.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
                       )
                     })()
                   ) : (
-                    <div className="text-xs text-app-text-dim">Select two branches to compare.</div>
+                    <div className="text-xs text-app-text-dim p-4">Select two branches to compare.</div>
                   )}
                 </div>
               )}
 
               {compareTab === 'preview' && (
-                <div className="h-full flex flex-col">
-                  <div className="px-4 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
-                    <div className="text-xs text-app-text-dim">Generated SQL (read-only)</div>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(compareSqlPreview)
-                      }}
-                      className="px-2 py-1 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded flex items-center gap-1.5"
-                    >
-                      <Copy className="w-3 h-3" />
-                      Copy
-                    </button>
+                <div className="h-full grid grid-cols-1 md:grid-cols-2 gap-px bg-app-border">
+                  {/* A → B Panel */}
+                  <div className="bg-app-bg flex flex-col min-h-0">
+                    <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs">
+                        <GitBranch className="w-3.5 h-3.5 text-app-text-dim" />
+                        <span className="font-semibold text-app-text">{compareBranches.a}</span>
+                        <span className="text-app-text-dim">→</span>
+                        <span className="font-semibold text-app-text">{compareBranches.b}</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(compareSqlPreview)
+                        }}
+                        className="px-2 py-1 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded flex items-center gap-1.5"
+                      >
+                        <Copy className="w-3 h-3" />
+                        Copy
+                      </button>
+                    </div>
+                    <div className="px-3 py-1.5 bg-app-sidebar/20 border-b border-app-border/50 text-xs text-app-text-dim">
+                      Apply these changes to transform {compareBranches.a} into {compareBranches.b} (read-only)
+                    </div>
+                    <div className="flex-1 min-h-0">
+                      <MonacoEditor
+                        height="100%"
+                        language="sql"
+                        theme="vs-dark"
+                        value={compareSqlPreview || '-- No changes detected'}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 13,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          readOnly: true,
+                          tabSize: 2,
+                          padding: { top: 16, bottom: 16 },
+                          fontFamily: 'Monaco, Menlo, "Courier New", monospace'
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="flex-1 min-h-0">
-                    <MonacoEditor
-                      height="100%"
-                      language="sql"
-                      theme="vs-dark"
-                      value={compareSqlPreview}
-                      options={{
-                        minimap: { enabled: false },
-                        fontSize: 13,
-                        lineNumbers: 'on',
-                        scrollBeyondLastLine: false,
-                        automaticLayout: true,
-                        readOnly: true,
-                        tabSize: 2,
-                        padding: { top: 16, bottom: 16 },
-                        fontFamily: 'Monaco, Menlo, "Courier New", monospace'
-                      }}
-                    />
+
+                  {/* B → A Panel */}
+                  <div className="bg-app-bg flex flex-col min-h-0">
+                    <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs">
+                        <GitBranch className="w-3.5 h-3.5 text-app-text-dim" />
+                        <span className="font-semibold text-app-text">{compareBranches.b}</span>
+                        <span className="text-app-text-dim">→</span>
+                        <span className="font-semibold text-app-text">{compareBranches.a}</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(compareSqlPreviewReverse)
+                        }}
+                        className="px-2 py-1 text-xs bg-app-sidebar-active hover:bg-app-sidebar-hover rounded flex items-center gap-1.5"
+                      >
+                        <Copy className="w-3 h-3" />
+                        Copy
+                      </button>
+                    </div>
+                    <div className="px-3 py-1.5 bg-app-sidebar/20 border-b border-app-border/50 text-xs text-app-text-dim">
+                      Apply these changes to transform {compareBranches.b} into {compareBranches.a} (read-only)
+                    </div>
+                    <div className="flex-1 min-h-0">
+                      <MonacoEditor
+                        height="100%"
+                        language="sql"
+                        theme="vs-dark"
+                        value={compareSqlPreviewReverse || '-- No changes detected'}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 13,
+                          lineNumbers: 'on',
+                          scrollBeyondLastLine: false,
+                          automaticLayout: true,
+                          readOnly: true,
+                          tabSize: 2,
+                          padding: { top: 16, bottom: 16 },
+                          fontFamily: 'Monaco, Menlo, "Courier New", monospace'
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1294,11 +1508,11 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
                     onClick={() => setCompareActiveTerminal('a')}
                   >
                     <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs text-app-text-dim">
-                        <GitBranch className="w-3.5 h-3.5" />
-                        <span>{compareBranches.a || 'Branch A'}</span>
+                      <div className="flex items-center gap-2 text-xs">
+                        <GitBranch className="w-3.5 h-3.5 text-app-text-dim" />
+                        <span className="font-semibold text-app-text">{compareBranches.a || 'Branch A'}</span>
                       </div>
-                      <span className="text-xs text-app-text-dim">Terminal A</span>
+                      <span className="text-xs text-app-text-dim">Editor A</span>
                     </div>
                     <div className="flex-1 min-h-0">
                       <MonacoEditor
@@ -1329,11 +1543,11 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
                     onClick={() => setCompareActiveTerminal('b')}
                   >
                     <div className="px-3 py-2 border-b border-app-border bg-app-sidebar/30 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs text-app-text-dim">
-                        <GitBranch className="w-3.5 h-3.5" />
-                        <span>{compareBranches.b || 'Branch B'}</span>
+                      <div className="flex items-center gap-2 text-xs">
+                        <GitBranch className="w-3.5 h-3.5 text-app-text-dim" />
+                        <span className="font-semibold text-app-text">{compareBranches.b || 'Branch B'}</span>
                       </div>
-                      <span className="text-xs text-app-text-dim">Terminal B</span>
+                      <span className="text-xs text-app-text-dim">Editor B</span>
                     </div>
                     <div className="flex-1 min-h-0">
                       <MonacoEditor

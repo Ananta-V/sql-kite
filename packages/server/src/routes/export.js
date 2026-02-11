@@ -1,5 +1,5 @@
 import { join } from 'path';
-import { existsSync, copyFileSync, unlinkSync, statSync, readFileSync } from 'fs';
+import { existsSync, copyFileSync, unlinkSync, statSync, readFileSync, writeFileSync } from 'fs';
 import Database from 'better-sqlite3';
 import { getCurrentBranch } from '../db/connections.js';
 
@@ -15,10 +15,10 @@ export default async function exportRoutes(fastify, options) {
    * Get export status and pre-flight checks
    */
   fastify.get('/status', async (request, reply) => {
-    const metaDb = fastify.getMetaDb();
-    const projectPath = fastify.projectPath;
-
     try {
+      const metaDb = fastify.getMetaDb();
+      const projectPath = fastify.projectPath;
+
       // Check if main branch exists
       const mainBranch = metaDb.prepare(`
         SELECT name, db_file, created_at FROM branches WHERE name = 'main'
@@ -30,20 +30,27 @@ export default async function exportRoutes(fastify, options) {
       let totalRows = 0;
       let lastModified = null;
       let pendingMigrations = 0;
-      let branchesAheadOfMain = 0;
 
       if (mainExists) {
-        const mainDbPath = join(projectPath, 'branches', mainBranch.db_file);
+        // Check if db_file includes 'branches/' prefix or is in root
+        const mainDbPath = mainBranch.db_file.includes('branches/')
+          ? join(projectPath, mainBranch.db_file)
+          : join(projectPath, 'branches', mainBranch.db_file);
         
-        if (existsSync(mainDbPath)) {
+        // Fallback: if branches path doesn't exist, try root path
+        const finalDbPath = existsSync(mainDbPath)
+          ? mainDbPath
+          : join(projectPath, mainBranch.db_file);
+        
+        if (existsSync(finalDbPath)) {
           try {
-            // Open main database to check health
-            const mainDb = new Database(mainDbPath, { readonly: true });
+            // Open main database to check health (not readonly to handle WAL mode properly)
+            const mainDb = new Database(finalDbPath);
             
-            // Check integrity - PRAGMA returns object with dynamic key
+            // Check integrity - PRAGMA returns object with integrity_check property
             const integrityResult = mainDb.prepare('PRAGMA integrity_check').get();
-            // The result could be { integrity_check: 'ok' } or just check the first value
-            const integrityValue = Object.values(integrityResult || {})[0];
+            // Access the property directly - it returns { integrity_check: 'ok' } when healthy
+            const integrityValue = integrityResult?.integrity_check;
             databaseHealthy = integrityValue === 'ok';
 
             // Get table count
@@ -66,7 +73,7 @@ export default async function exportRoutes(fastify, options) {
             mainDb.close();
 
             // Get file modification time
-            const stat = statSync(mainDbPath);
+            const stat = statSync(finalDbPath);
             lastModified = stat.mtime.toISOString();
           } catch (error) {
             console.error('Error checking main database health:', error);
@@ -85,16 +92,6 @@ export default async function exportRoutes(fastify, options) {
           // Migrations table might not exist
           pendingMigrations = 0;
         }
-
-        // Count branches that have changes not in main
-        try {
-          const branchCount = metaDb.prepare(`
-            SELECT COUNT(*) as cnt FROM branches WHERE name != 'main'
-          `).get();
-          branchesAheadOfMain = branchCount?.cnt || 0;
-        } catch (e) {
-          branchesAheadOfMain = 0;
-        }
       }
 
       return {
@@ -103,11 +100,13 @@ export default async function exportRoutes(fastify, options) {
         tableCount,
         totalRows,
         lastModified,
-        pendingMigrations,
-        branchesAheadOfMain
+        pendingMigrations
       };
     } catch (error) {
-      reply.code(500).send({ error: error.message });
+      console.error('Export status error:', error);
+      return reply.code(500).send({ 
+        error: error.message
+      });
     }
   });
 
@@ -138,9 +137,17 @@ export default async function exportRoutes(fastify, options) {
         });
       }
 
-      const mainDbPath = join(projectPath, 'branches', mainBranch.db_file);
+      // Check if db_file includes 'branches/' prefix or is in root
+      const mainDbPath = mainBranch.db_file.includes('branches/')
+        ? join(projectPath, mainBranch.db_file)
+        : join(projectPath, 'branches', mainBranch.db_file);
+      
+      // Fallback: if branches path doesn't exist, try root path
+      const finalDbPath = existsSync(mainDbPath)
+        ? mainDbPath
+        : join(projectPath, mainBranch.db_file);
 
-      if (!existsSync(mainDbPath)) {
+      if (!existsSync(finalDbPath)) {
         return reply.code(400).send({ 
           error: 'Main database file not found.' 
         });
@@ -151,7 +158,7 @@ export default async function exportRoutes(fastify, options) {
 
       try {
         // Open the main database
-        const sourceDb = new Database(mainDbPath);
+        const sourceDb = new Database(finalDbPath);
 
         // Perform WAL checkpoint to ensure all data is in main file
         sourceDb.pragma('wal_checkpoint(TRUNCATE)');

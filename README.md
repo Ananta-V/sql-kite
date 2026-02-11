@@ -178,13 +178,13 @@ npm install -g sql-kite
 ### 1) Create a project
 
 ```bash
-sql-kite new my-db
+npm run sql-kite new my-db
 ```
 
 ### 2) Start the studio
 
 ```bash
-sql-kite start my-db
+npm run sql-kite start my-db
 ```
 
 Your browser opens automatically.
@@ -194,7 +194,7 @@ Your browser opens automatically.
 ### Import an existing database
 
 ```bash
-sql-kite import ./database.db
+npm run sql-kite import ./database.db
 ```
 
 > SQL Kite will safely adopt the file into a managed workspace.
@@ -203,16 +203,81 @@ sql-kite import ./database.db
 
 ## CLI Commands
 
-| Command                    | Description     |
-| -------------------------- | --------------- |
-| `sql-kite new <name>`      | Create project  |
-| `sql-kite import <path>`   | Import database |
-| `sql-kite start <name>`    | Launch Studio   |
-| `sql-kite stop <name>`     | Stop server     |
-| `sql-kite open <name>`     | Open UI         |
-| `sql-kite list`            | List projects   |
-| `sql-kite delete <name>`   | Remove project  |
-| `sql-kite ports`           | Show port usage |
+| Command                            | Description     |
+| ---------------------------------- | --------------- |
+| `npm run sql-kite new <name>`      | Create project  |
+| `npm run sql-kite import <path>`   | Import database |
+| `npm run sql-kite start <name>`    | Launch Studio   |
+| `npm run sql-kite stop <name>`     | Stop server     |
+| `npm run sql-kite open <name>`     | Open UI         |
+| `npm run sql-kite list`            | List projects   |
+| `npm run sql-kite delete <name>`   | Remove project  |
+| `npm run sql-kite ports`           | Show port usage |
+| `npm run sql-kite init`            | Scaffold app database layer |
+
+---
+
+## App Integration
+
+### For React Native / Expo Apps
+
+SQL Kite provides a database integration layer with automatic dev/production switching.
+
+**1) Scaffold the integration:**
+
+```bash
+cd your-app-project
+npm run sql-kite init
+```
+
+This creates:
+```
+lib/database/
+  ├── index.js
+  ├── engine.dev.js
+  └── engine.local.js
+```
+
+**2) Use in your app:**
+
+```javascript
+import { runQuery } from '@/lib/database';
+
+const users = await runQuery("SELECT * FROM users WHERE active = ?", [1]);
+```
+
+### Two Workflow Modes
+
+**Development Mode:**
+- Queries go to SQL-Kite server via HTTP
+- API is locked to `main` branch only
+- Switch branches freely in Studio - your app stays isolated
+- Configure port via `SQL_KITE_PORT` env variable
+
+**Production Mode:**
+- Queries run locally via expo-sqlite
+- Export `main.db` from SQL-Kite UI
+- Bundle it with your app
+- No server required
+
+### Why This Architecture?
+
+**Same code. Different engine.**
+
+```javascript
+// This works everywhere
+runQuery("SELECT * FROM users")
+
+// Development → HTTP to SQL-Kite
+// Production  → Local SQLite
+```
+
+Your app never knows:
+- That branches exist
+- That you're switching between dev/prod
+- About SQL-Kite's internal tooling
+
+> Clean separation between development tools and runtime code.
 
 ---
 

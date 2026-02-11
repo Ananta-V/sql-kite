@@ -9,6 +9,7 @@ import { openCommand } from './commands/open.js';
 import { portsCommand } from './commands/ports.js';
 import importCommand from './commands/import.js';
 import importServerCommand from './commands/import-server.js';
+import { initCommand } from './commands/init.js';
 
 const program = new Command();
 
@@ -21,6 +22,11 @@ program
   .command('new <name>')
   .description('Create a new database project')
   .action(newCommand);
+
+program
+  .command('init')
+  .description('Scaffold database integration layer in app project')
+  .action(initCommand);
 
 program
   .command('start <name>')

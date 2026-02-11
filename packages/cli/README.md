@@ -10,11 +10,15 @@
 
 <p align="center">
   <strong>Version-controlled SQLite for local development.</strong>
-</p>init
+</p>
 
 <p align="center">
   Branch your database. Inspect every change. Recover instantly.<br/>
   <b>No cloud • No accounts • No telemetry</b>
+</p>
+
+<p align="center">
+  <code>npm install -g sql-kite</code>
 </p>
 
 ---
@@ -140,22 +144,6 @@ A clean local interface for:
 
 ---
 
-## Screenshots
-
-### SQL Editor
-
-Execute queries, save templates, and export results with full SQL syntax highlighting.
-
-![SQL Editor](../../screenshots/sql-editor.png)
-
-### Database Schema Viewer
-
-Browse tables, inspect columns, constraints, indexes, and relationships in a clean interface.
-
-![Database Schema](../../screenshots/database-schema.png)
-
----
-
 ## Zero-Cloud Architecture
 
 SQL Kite runs **entirely on your machine**.
@@ -176,25 +164,65 @@ SQL Kite runs **entirely on your machine**.
 
 ### Requirements
 
-* Node.js 18+
-* npm
+* **Node.js 18** (LTS recommended)
+* **npm**
 
-### Install Globally (Recommended)
+> **Important:** SQL Kite uses [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3), a native C++ module. Node.js 20+ may have compatibility issues with the current version. **Node.js 18 LTS is recommended** for the best experience.
 
-Install SQL Kite globally to use it from anywhere:
+**Windows users:** If installation fails, you may need native build tools:
+1. Re-run the Node.js installer and check **"Automatically install the necessary tools"**
+2. Or run `C:\Program Files\nodejs\install_tools.bat` to install Python and Visual Studio Build Tools
+
+> **No special characters or spaces in your project path** — `node-gyp` may not handle them correctly.
+
+### Option 1: Global Installation (Recommended)
+
+Install globally to use `sql-kite` commands from anywhere:
 
 ```bash
 npm install -g sql-kite
 ```
 
-After installation, you can use `sql-kite` commands directly:
+**Usage after global installation:**
 
 ```bash
 sql-kite new my-db
 sql-kite start my-db
+sql-kite list
 ```
 
-> **Note:** Use global installation (`-g` flag) for CLI tools. After installing globally, run commands directly as `sql-kite <command>`, not `npm run sql-kite <command>`.
+### Option 2: Local Installation
+
+Install locally in your project:
+
+```bash
+npm install sql-kite
+```
+
+**Usage after local installation:**
+
+Add this script to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "sql-kite": "sql-kite"
+  }
+}
+```
+
+Then run:
+
+```bash
+npm run sql-kite new my-db
+npm run sql-kite start my-db
+npm run sql-kite list
+npm run sql-kite import ./database.db
+```
+
+---
+
+> **Recommendation:** Use global installation for CLI tools to avoid typing `npm run` every time.
 
 ---
 
@@ -265,6 +293,12 @@ lib/database/
   └── engine.local.js
 ```
 
+| File | Purpose |
+|---|---|
+| `index.js` | Auto-switches between dev and production engines |
+| `engine.dev.js` | HTTP client that queries the SQL-Kite server |
+| `engine.local.js` | Local SQLite via expo-sqlite for production |
+
 **2) Use in your app:**
 
 ```javascript
@@ -272,6 +306,29 @@ import { runQuery } from '@/lib/database';
 
 const users = await runQuery("SELECT * FROM users WHERE active = ?", [1]);
 ```
+
+### How Dev/Prod Switching Works
+
+The switching is **fully automatic** — the user does not need to manually toggle anything.
+
+```javascript
+const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV === 'development';
+```
+
+**Detection order:**
+1. **Expo's `__DEV__` global** — automatically `true` in dev builds, `false` in production
+2. **Fallback:** `process.env.NODE_ENV === 'development'`
+
+| Environment | Engine Used | How it works |
+|---|---|---|
+| Development (`isDev = true`) | `engine.dev.js` | Queries go to SQL-Kite server via HTTP |
+| Production (`isDev = false`) | `engine.local.js` | Queries run locally via expo-sqlite |
+
+### Port Configuration (Dev Mode)
+
+The dev engine connects to the SQL-Kite server using:
+- `SQL_KITE_PORT` environment variable (if set)
+- Default port `3000` (editable in the generated `engine.dev.js`)
 
 ### Two Workflow Modes
 

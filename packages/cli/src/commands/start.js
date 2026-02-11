@@ -1,7 +1,6 @@
 import { spawn } from 'child_process';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import http from 'http';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -9,11 +8,11 @@ import open from 'open';
 import {
   getProjectPath,
   getProjectServerInfoPath,
-  projectExists
+  projectExists,
+  getStudioOutPath,
+  getServerEntryPath
 } from '../utils/paths.js';
 import { findFreePort } from '../utils/port-finder.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Helper function to check if server is ready
 async function waitForServer(port, maxAttempts = 30) {
@@ -50,7 +49,7 @@ export async function startCommand(name) {
   }
   
   // Check if studio is built
-  const studioPath = join(__dirname, '../../../studio/out');
+  const studioPath = getStudioOutPath();
   if (!existsSync(studioPath)) {
     console.log(chalk.red(`✗ Studio UI not built yet`));
     console.log(chalk.dim(`   Run: ${chalk.cyan(`cd packages/studio && npm run build`)}`));
@@ -80,7 +79,7 @@ export async function startCommand(name) {
     const projectPath = getProjectPath(name);
     
     // Path to server package
-    const serverPath = join(__dirname, '../../../server/src/index.js');
+    const serverPath = getServerEntryPath();
     
     // Spawn server process
     const serverProcess = spawn('node', [serverPath], {

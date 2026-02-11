@@ -110,7 +110,9 @@ export default async function branchesRoutes(fastify, options) {
       }
 
       const sourceDbPath = join(fastify.projectPath, sourceInfo.db_file);
-      const newDbFile = `${name}.db.sqlite`;
+      // Sanitize branch name for filename: replace slashes with hyphens
+      const safeDbName = name.replace(/\//g, '-');
+      const newDbFile = `${safeDbName}.db.sqlite`;
       const newDbPath = join(fastify.projectPath, newDbFile);
 
       // CRITICAL: Checkpoint WAL to ensure clean snapshot

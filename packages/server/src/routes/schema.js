@@ -93,7 +93,7 @@ export default async function schemaRoutes(fastify, options) {
         exportSql += obj.sql + ';\\n\\n';
       }
 
-      const projectName = fastify.projectPath.split(/[\\\\/]/).pop();
+      const projectName = fastify.projectName;
       const filename = `${projectName}_${currentBranch}_schema.sql`;
 
       reply.header('Content-Type', 'text/plain');

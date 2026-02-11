@@ -32,20 +32,13 @@ export default async function exportRoutes(fastify, options) {
       let pendingMigrations = 0;
 
       if (mainExists) {
-        // Check if db_file includes 'branches/' prefix or is in root
-        const mainDbPath = mainBranch.db_file.includes('branches/')
-          ? join(projectPath, mainBranch.db_file)
-          : join(projectPath, 'branches', mainBranch.db_file);
+        // Resolve database path consistently with the rest of the codebase
+        const mainDbPath = join(projectPath, mainBranch.db_file);
         
-        // Fallback: if branches path doesn't exist, try root path
-        const finalDbPath = existsSync(mainDbPath)
-          ? mainDbPath
-          : join(projectPath, mainBranch.db_file);
-        
-        if (existsSync(finalDbPath)) {
+        if (existsSync(mainDbPath)) {
           try {
             // Open main database to check health (not readonly to handle WAL mode properly)
-            const mainDb = new Database(finalDbPath);
+            const mainDb = new Database(mainDbPath);
             
             // Check integrity - PRAGMA returns object with integrity_check property
             const integrityResult = mainDb.prepare('PRAGMA integrity_check').get();
@@ -73,7 +66,7 @@ export default async function exportRoutes(fastify, options) {
             mainDb.close();
 
             // Get file modification time
-            const stat = statSync(finalDbPath);
+            const stat = statSync(mainDbPath);
             lastModified = stat.mtime.toISOString();
           } catch (error) {
             console.error('Error checking main database health:', error);
@@ -137,17 +130,10 @@ export default async function exportRoutes(fastify, options) {
         });
       }
 
-      // Check if db_file includes 'branches/' prefix or is in root
-      const mainDbPath = mainBranch.db_file.includes('branches/')
-        ? join(projectPath, mainBranch.db_file)
-        : join(projectPath, 'branches', mainBranch.db_file);
-      
-      // Fallback: if branches path doesn't exist, try root path
-      const finalDbPath = existsSync(mainDbPath)
-        ? mainDbPath
-        : join(projectPath, mainBranch.db_file);
+      // Resolve database path consistently
+      const mainDbPath = join(projectPath, mainBranch.db_file);
 
-      if (!existsSync(finalDbPath)) {
+      if (!existsSync(mainDbPath)) {
         return reply.code(400).send({ 
           error: 'Main database file not found.' 
         });
@@ -158,7 +144,7 @@ export default async function exportRoutes(fastify, options) {
 
       try {
         // Open the main database
-        const sourceDb = new Database(finalDbPath);
+        const sourceDb = new Database(mainDbPath);
 
         // Perform WAL checkpoint to ensure all data is in main file
         sourceDb.pragma('wal_checkpoint(TRUNCATE)');

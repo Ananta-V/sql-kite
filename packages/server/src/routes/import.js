@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import Database from 'better-sqlite3'
 import { findFreePort } from '../../../cli/src/utils/port-finder.js'
 import { migrateMetaDb } from '../../../cli/src/utils/meta-migration.js'
+import { validateProjectName } from '../../../cli/src/utils/paths.js'
 
 export default async function importRoutes(fastify, options) {
   const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -45,8 +46,16 @@ export default async function importRoutes(fastify, options) {
   fastify.post('/create', async (request, reply) => {
     const { projectName, sourcePath, importMode } = request.body
 
+    // Validate project name to prevent path traversal
+    const validation = validateProjectName(projectName)
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.error })
+    }
+
+    const safeName = validation.sanitized
+
     try {
-      const projectPath = join(projectsRoot, projectName)
+      const projectPath = join(projectsRoot, safeName)
 
       // Check if project already exists
       if (existsSync(projectPath)) {
@@ -63,7 +72,7 @@ export default async function importRoutes(fastify, options) {
 
       // Create config.json
       const config = {
-        name: projectName,
+        name: safeName,
         created_at: new Date().toISOString(),
         version: '1.0.0'
       }
@@ -100,8 +109,14 @@ export default async function importRoutes(fastify, options) {
   fastify.post('/copy', async (request, reply) => {
     const { projectName, sourcePath, importMode } = request.body
 
+    // Validate project name
+    const validation = validateProjectName(projectName)
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.error })
+    }
+
     try {
-      const projectPath = join(projectsRoot, projectName)
+      const projectPath = join(projectsRoot, validation.sanitized)
       const targetPath = join(projectPath, 'db.sqlite')
 
       if (importMode === 'copy') {
@@ -192,8 +207,14 @@ export default async function importRoutes(fastify, options) {
   fastify.post('/snapshot', async (request, reply) => {
     const { projectName } = request.body
 
+    // Validate project name
+    const validation = validateProjectName(projectName)
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.error })
+    }
+
     try {
-      const projectPath = join(projectsRoot, projectName)
+      const projectPath = join(projectsRoot, validation.sanitized)
       const metaDbPath = join(projectPath, '.studio', 'meta.db')
       const metaDb = new Database(metaDbPath)
       const branchInfo = metaDb.prepare(`
@@ -248,8 +269,15 @@ export default async function importRoutes(fastify, options) {
   fastify.post('/finalize', async (request, reply) => {
     const { projectName } = request.body
 
+    // Validate project name
+    const validation = validateProjectName(projectName)
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.error })
+    }
+    const safeName = validation.sanitized
+
     try {
-      const projectPath = join(projectsRoot, projectName)
+      const projectPath = join(projectsRoot, safeName)
       const metaDbPath = join(projectPath, '.studio', 'meta.db')
       const metaDb = new Database(metaDbPath)
 
@@ -291,14 +319,14 @@ export default async function importRoutes(fastify, options) {
         return { success: true, server: { running: true, port: serverInfo.port } }
       }
 
-      const port = await findFreePort(3000, projectName)
+      const port = await findFreePort(3000, safeName)
       const serverPath = join(__dirname, '..', 'index.js')
       const serverProcess = spawn('node', [serverPath], {
         detached: true,
         stdio: 'ignore',
         env: {
           ...process.env,
-          PROJECT_NAME: projectName,
+          PROJECT_NAME: safeName,
           PROJECT_PATH: projectPath,
           PORT: port.toString(),
           IMPORT_MODE: 'false'

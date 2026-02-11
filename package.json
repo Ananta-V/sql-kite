@@ -1,6 +1,8 @@
 {
   "name": "sql-kite",
   "version": "1.0.0",
+  "description": "A local SQLite database management platform with a Studio UI",
+  "license": "MIT",
   "private": true,
   "workspaces": [
     "packages/*"

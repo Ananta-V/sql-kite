@@ -51,9 +51,25 @@ const fastify = Fastify({
   }
 });
 
-// CORS
+// CORS - Restrict to localhost origins only for security
+// This prevents CSRF-style attacks from malicious websites
+// Uses a function to allow any localhost port dynamically
 await fastify.register(cors, {
-  origin: true
+  origin: (origin, callback) => {
+    // Allow requests with no origin (same-origin, curl, Postman, etc.)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Allow any localhost or 127.0.0.1 origin (any port)
+    const localhostPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+    if (localhostPattern.test(origin)) {
+      return callback(null, true);
+    }
+    
+    // Block all other origins
+    return callback(new Error('CORS not allowed'), false);
+  }
 });
 
 // Store project info in fastify instance (if not in import mode)

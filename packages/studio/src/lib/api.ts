@@ -35,6 +35,39 @@ export async function executeQuery(sql: string) {
   return data
 }
 
+export async function executeCompareQuery(branch: string, sql: string) {
+  const res = await fetch(`${API_BASE}/compare/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branch, sql })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Compare query failed')
+  return data
+}
+
+export async function checkpointCompareBranches(branches: string[]) {
+  const res = await fetch(`${API_BASE}/compare/checkpoint`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branches })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Compare checkpoint failed')
+  return data
+}
+
+export async function closeCompareBranches(branches: string[]) {
+  const res = await fetch(`${API_BASE}/compare/close`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branches })
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Compare close failed')
+  return data
+}
+
 export async function getTimeline(limit = 50, offset = 0, allBranches = false) {
   const url = `${API_BASE}/timeline?limit=${limit}&offset=${offset}${allBranches ? '&all_branches=true' : ''}`
   const res = await fetch(url)

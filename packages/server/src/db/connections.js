@@ -74,3 +74,41 @@ export function closeBranchConnection(projectPath, branchName) {
     connections.delete(key);
   }
 }
+
+/**
+ * Get a read-only user database connection for compare mode
+ */
+export function getReadOnlyUserDb(projectPath, branchName) {
+  const branch = branchName || getCurrentBranch(projectPath);
+  const key = `readonly-${projectPath}-${branch}`;
+
+  if (!connections.has(key)) {
+    const metaDb = getMetaDb(projectPath);
+
+    const branchInfo = metaDb.prepare(`
+      SELECT db_file FROM branches WHERE name = ?
+    `).get(branch);
+
+    if (!branchInfo) {
+      throw new Error(`Branch "${branch}" does not exist`);
+    }
+
+    const dbPath = join(projectPath, branchInfo.db_file);
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db.pragma('query_only = ON');
+    db.pragma('busy_timeout = 2000');
+    connections.set(key, db);
+  }
+
+  return connections.get(key);
+}
+
+export function closeReadOnlyBranchConnection(projectPath, branchName) {
+  const key = `readonly-${projectPath}-${branchName}`;
+
+  if (connections.has(key)) {
+    const db = connections.get(key);
+    db.close();
+    connections.delete(key);
+  }
+}

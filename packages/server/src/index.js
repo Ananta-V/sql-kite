@@ -15,6 +15,7 @@ import migrationsRoutes from './routes/migrations.js';
 import snapshotsRoutes from './routes/snapshots.js';
 import branchesRoutes from './routes/branches.js';
 import importRoutes from './routes/import.js';
+import compareRoutes from './routes/compare.js';
 
 // Import meta migration
 import { migrateMetaDb } from '../../cli/src/utils/meta-migration.js';
@@ -76,6 +77,7 @@ if (!IMPORT_MODE) {
   fastify.register(timelineRoutes, { prefix: '/api/timeline' });
   fastify.register(migrationsRoutes, { prefix: '/api/migrations' });
   fastify.register(snapshotsRoutes, { prefix: '/api/snapshots' });
+  fastify.register(compareRoutes, { prefix: '/api/compare' });
 }
 
 // Project info endpoint (only in project mode)

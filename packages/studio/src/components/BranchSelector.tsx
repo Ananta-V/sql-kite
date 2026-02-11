@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { GitBranch, ChevronDown, Check, Plus, Loader } from 'lucide-react'
+import { GitBranch, ChevronDown, Check, Plus, Loader, Lock } from 'lucide-react'
 import { getBranches, switchBranch } from '@/lib/api'
 
 interface Branch {
@@ -16,12 +16,14 @@ interface BranchSelectorProps {
   currentBranch: string
   onBranchChange?: () => void
   onCreateClick?: () => void
+  disabled?: boolean
 }
 
 export default function BranchSelector({
   currentBranch,
   onBranchChange,
-  onCreateClick
+  onCreateClick,
+  disabled = false
 }: BranchSelectorProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [branches, setBranches] = useState<Branch[]>([])
@@ -90,16 +92,21 @@ export default function BranchSelector({
     <div className="relative" ref={dropdownRef}>
       {/* Trigger Button */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="px-3 py-1.5 bg-app-sidebar border border-app-border rounded hover:border-app-border-hover transition-colors flex items-center gap-2 text-sm"
+        onClick={() => {
+          if (!disabled) setIsOpen(!isOpen)
+        }}
+        className={`px-3 py-1.5 bg-app-sidebar border border-app-border rounded transition-colors flex items-center gap-2 text-sm ${disabled ? 'opacity-60 cursor-not-allowed' : 'hover:border-app-border-hover'}`}
+        title={disabled ? 'Disabled in Compare Mode' : undefined}
+        disabled={disabled}
       >
         <GitBranch className="w-4 h-4" />
         <span className="font-medium">{currentBranch}</span>
+        {disabled && <Lock className="w-3.5 h-3.5 text-app-text-dim" />}
         <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {/* Dropdown */}
-      {isOpen && (
+      {isOpen && !disabled && (
         <div className="absolute top-full right-0 mt-2 w-64 bg-app-sidebar border border-app-border rounded-lg shadow-lg overflow-hidden z-50">
           {/* Header */}
           <div className="px-3 py-2 border-b border-app-border bg-app-bg">

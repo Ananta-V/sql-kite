@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useAppContext } from '@/contexts/AppContext'
+import { toast } from 'react-toastify'
 import {
   ChevronDown,
   ChevronRight,
@@ -9,7 +10,6 @@ import {
   Folder,
   FolderOpen,
   Star,
-  Plus,
   MoreVertical,
   Copy,
   Trash2,
@@ -33,7 +33,7 @@ interface InnerSidebarProps {
   disabled?: boolean
   privateItems?: SnippetItem[]
   onPrivateItemsChange?: (items: SnippetItem[]) => void
-  onPrivateItemClick?: (item: SnippetItem) => void
+  onOpenFile?: (item: SnippetItem, section: 'favorites' | 'templates' | 'private') => void
 }
 
 export default function InnerSidebar({ 
@@ -41,7 +41,7 @@ export default function InnerSidebar({
   disabled = false,
   privateItems = [],
   onPrivateItemsChange,
-  onPrivateItemClick
+  onOpenFile
 }: InnerSidebarProps) {
   const { updateSQL } = useAppContext()
   const disableTitle = 'Disabled in Compare Mode'
@@ -54,6 +54,7 @@ export default function InnerSidebar({
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
   const [draggedItem, setDraggedItem] = useState<{ item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
+  const [dragOverTarget, setDragOverTarget] = useState<{ type: 'section' | 'folder'; id: string } | null>(null)
   
   // Rename modal state
   const [renameModal, setRenameModal] = useState<{ item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
@@ -126,36 +127,160 @@ export default function InnerSidebar({
     setContextMenu({ x: e.clientX, y: e.clientY, item, section })
   }
 
-  function handleDragStart(item: SnippetItem, section: 'favorites' | 'templates' | 'private') {
+  function handleDragStart(e: React.DragEvent, item: SnippetItem, section: 'favorites' | 'templates' | 'private') {
     if (disabled) return
+    e.dataTransfer.effectAllowed = 'move'
     setDraggedItem({ item, section })
   }
 
-  function handleDrop(targetItem: SnippetItem, targetSection: 'favorites' | 'templates' | 'private') {
-    if (disabled) return
-    if (!draggedItem) return
-
-    // Handle drop logic here
-    console.log('Drop', draggedItem.item.label, 'onto', targetItem.label)
+  function handleDragEnd() {
     setDraggedItem(null)
+    setDragOverTarget(null)
   }
 
-  function handleAddSnippet(section: 'favorites' | 'templates' | 'private') {
-    if (disabled) return
-    const newSnippet: SnippetItem = {
-      id: `snippet-${Date.now()}`,
-      label: 'New snippet',
-      type: 'file',
-      sql: '-- Write your SQL here'
+  // Check if an item is a descendant of a folder
+  function isDescendant(folderId: string, itemId: string, items: SnippetItem[]): boolean {
+    for (const item of items) {
+      if (item.id === folderId && item.type === 'folder' && item.children) {
+        // Check if itemId is directly in children or deeper
+        const found = item.children.some(child => 
+          child.id === itemId || (child.type === 'folder' && isDescendant(child.id, itemId, [child]))
+        )
+        if (found) return true
+      }
+      if (item.children) {
+        if (isDescendant(folderId, itemId, item.children)) return true
+      }
+    }
+    return false
+  }
+
+  // Remove item from its current location
+  function removeItem(items: SnippetItem[], itemId: string): SnippetItem[] {
+    return items.filter(item => {
+      if (item.id === itemId) return false
+      if (item.children) {
+        item.children = removeItem(item.children, itemId)
+      }
+      return true
+    }).map(item => ({ ...item }))
+  }
+
+  // Add item to a folder or root
+  function addItemToFolder(items: SnippetItem[], targetFolderId: string | null, newItem: SnippetItem): SnippetItem[] {
+    if (targetFolderId === null) {
+      // Add to root
+      return [...items, newItem]
     }
 
-    if (section === 'favorites') {
-      setFavorites([...favorites, newSnippet])
-    } else if (section === 'templates') {
-      setTemplates([...templates, newSnippet])
-    } else if (section === 'private' && onPrivateItemsChange) {
-      onPrivateItemsChange([...privateItems, newSnippet])
+    return items.map(item => {
+      if (item.id === targetFolderId && item.type === 'folder') {
+        return {
+          ...item,
+          children: [...(item.children || []), newItem]
+        }
+      }
+      if (item.children) {
+        return {
+          ...item,
+          children: addItemToFolder(item.children, targetFolderId, newItem)
+        }
+      }
+      return item
+    })
+  }
+
+  // Get items for a section
+  function getSectionItems(section: 'favorites' | 'templates' | 'private'): SnippetItem[] {
+    if (section === 'favorites') return favorites
+    if (section === 'templates') return templates
+    return privateItems
+  }
+
+  // Set items for a section
+  function setSectionItems(section: 'favorites' | 'templates' | 'private', items: SnippetItem[]) {
+    if (section === 'favorites') setFavorites(items)
+    else if (section === 'templates') setTemplates(items)
+    else if (section === 'private' && onPrivateItemsChange) onPrivateItemsChange(items)
+  }
+
+  // Handle drop onto a folder
+  function handleDropOnFolder(targetFolder: SnippetItem, targetSection: 'favorites' | 'templates' | 'private') {
+    if (disabled || !draggedItem) return
+
+    const { item: sourceItem, section: sourceSection } = draggedItem
+
+    // Prevent dropping on itself
+    if (sourceItem.id === targetFolder.id) {
+      setDraggedItem(null)
+      setDragOverTarget(null)
+      return
     }
+
+    // Prevent dropping a folder into its own descendant
+    if (sourceItem.type === 'folder') {
+      const targetItems = getSectionItems(targetSection)
+      if (isDescendant(sourceItem.id, targetFolder.id, targetItems)) {
+        toast.error("Cannot move folder into its own subfolder")
+        setDraggedItem(null)
+        setDragOverTarget(null)
+        return
+      }
+    }
+
+    // Clone the source item
+    const itemToMove: SnippetItem = JSON.parse(JSON.stringify(sourceItem))
+
+    // Remove from source
+    const sourceItems = getSectionItems(sourceSection)
+    const updatedSourceItems = removeItem(sourceItems, sourceItem.id)
+
+    if (sourceSection === targetSection) {
+      // Same section: remove and add
+      const finalItems = addItemToFolder(updatedSourceItems, targetFolder.id, itemToMove)
+      setSectionItems(sourceSection, finalItems)
+    } else {
+      // Different sections: remove from source, add to target
+      setSectionItems(sourceSection, updatedSourceItems)
+      const targetItems = getSectionItems(targetSection)
+      const updatedTargetItems = addItemToFolder(targetItems, targetFolder.id, itemToMove)
+      setSectionItems(targetSection, updatedTargetItems)
+    }
+
+    toast.success(`Moved "${sourceItem.label}" to "${targetFolder.label}"`)
+    setDraggedItem(null)
+    setDragOverTarget(null)
+  }
+
+  // Handle drop onto section header (root)
+  function handleDropOnSection(targetSection: 'favorites' | 'templates' | 'private') {
+    if (disabled || !draggedItem) return
+
+    const { item: sourceItem, section: sourceSection } = draggedItem
+
+    // Clone the source item
+    const itemToMove: SnippetItem = JSON.parse(JSON.stringify(sourceItem))
+
+    // Remove from source
+    const sourceItems = getSectionItems(sourceSection)
+    const updatedSourceItems = removeItem(sourceItems, sourceItem.id)
+
+    if (sourceSection === targetSection) {
+      // Same section: just move to root level
+      const finalItems = [...updatedSourceItems, itemToMove]
+      setSectionItems(sourceSection, finalItems)
+    } else {
+      // Different sections: remove from source, add to target root
+      setSectionItems(sourceSection, updatedSourceItems)
+      const targetItems = getSectionItems(targetSection)
+      const updatedTargetItems = [...targetItems, itemToMove]
+      setSectionItems(targetSection, updatedTargetItems)
+    }
+
+    const sectionNames = { favorites: 'Favorites', templates: 'Templates', private: 'Private' }
+    toast.success(`Moved "${sourceItem.label}" to ${sectionNames[targetSection]}`)
+    setDraggedItem(null)
+    setDragOverTarget(null)
   }
 
   function handleAddFolder(section: 'favorites' | 'templates' | 'private') {
@@ -258,37 +383,67 @@ export default function InnerSidebar({
   ) {
     const isFolder = item.type === 'folder'
     const isExpanded = expandedFolders.has(item.id)
+    const isDragOver = dragOverTarget?.type === 'folder' && dragOverTarget.id === item.id
+    const isDragging = draggedItem?.item.id === item.id
 
     function handleClick() {
       if (disabled) return
       if (isFolder) {
         toggleFolder(item.id)
-      } else if (section === 'private' && onPrivateItemClick) {
-        onPrivateItemClick(item)
-      } else if (item.sql) {
-        // Load SQL into editor when clicking on a file
-        updateSQL(item.sql)
+      } else if (item.sql && onOpenFile) {
+        // Open file in a new tab
+        onOpenFile(item, section)
       }
     }
 
     return (
       <div key={item.id}>
         <div
-          draggable={!isFolder}
-          onDragStart={() => handleDragStart(item, section)}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={() => handleDrop(item, section)}
+          draggable={!disabled}
+          onDragStart={(e) => handleDragStart(e, item, section)}
+          onDragEnd={handleDragEnd}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (isFolder && draggedItem && draggedItem.item.id !== item.id) {
+              setDragOverTarget({ type: 'folder', id: item.id })
+            }
+          }}
+          onDragLeave={(e) => {
+            e.stopPropagation()
+            if (dragOverTarget?.id === item.id) {
+              setDragOverTarget(null)
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (isFolder) {
+              handleDropOnFolder(item, section)
+            }
+          }}
           onContextMenu={(e) => handleContextMenu(e, item, section)}
           onClick={handleClick}
           className={`
-            flex items-center justify-between px-2 py-1.5 text-sm rounded
+            relative flex items-center justify-between px-2 py-1.5 text-sm rounded
             transition-colors cursor-pointer group
-            hover:bg-app-sidebar-hover
+            ${isDragging ? 'opacity-50' : ''}
+            ${isDragOver && isFolder ? 'bg-app-accent/20 ring-1 ring-app-accent' : 'hover:bg-app-sidebar-hover'}
           `}
           title={disabled ? disableTitle : undefined}
           style={{ paddingLeft: `${8 + depth * 12}px` }}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
+            {/* Horizontal connector line for nested items */}
+            {depth > 0 && (
+              <div 
+                className="absolute h-px bg-app-border/50" 
+                style={{ 
+                  left: `${14 + (depth - 1) * 12}px`, 
+                  width: '8px' 
+                }} 
+              />
+            )}
             {isFolder ? (
               <>
                 {isExpanded ? (
@@ -297,15 +452,15 @@ export default function InnerSidebar({
                   <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 text-app-text-dim" />
                 )}
                 {isExpanded ? (
-                  <FolderOpen className="w-4 h-4 flex-shrink-0 text-app-text-dim" />
+                  <FolderOpen className="w-4 h-4 flex-shrink-0 text-yellow-500/70" />
                 ) : (
-                  <Folder className="w-4 h-4 flex-shrink-0 text-app-text-dim" />
+                  <Folder className="w-4 h-4 flex-shrink-0 text-yellow-500/70" />
                 )}
               </>
             ) : (
               <>
                 <div className="w-3.5" /> {/* Spacer for alignment */}
-                <FileCode className="w-4 h-4 flex-shrink-0 text-app-text-dim" />
+                <FileCode className="w-4 h-4 flex-shrink-0 text-blue-400/70" />
               </>
             )}
             <span className="truncate text-app-text">{item.label}</span>
@@ -326,8 +481,51 @@ export default function InnerSidebar({
 
         {/* Render children if folder is expanded */}
         {isFolder && isExpanded && item.children && (
-          <div>
-            {item.children.map(child => renderItem(child, section, depth + 1))}
+          <div
+            className={`relative ${
+              dragOverTarget?.type === 'folder' && dragOverTarget.id === item.id 
+                ? 'bg-app-accent/10' 
+                : ''
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              if (draggedItem && draggedItem.item.id !== item.id) {
+                setDragOverTarget({ type: 'folder', id: item.id })
+              }
+            }}
+            onDragLeave={(e) => {
+              // Only clear if leaving the container entirely
+              const rect = e.currentTarget.getBoundingClientRect()
+              const x = e.clientX
+              const y = e.clientY
+              if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+                if (dragOverTarget?.id === item.id) {
+                  setDragOverTarget(null)
+                }
+              }
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleDropOnFolder(item, section)
+            }}
+          >
+            {/* Tree line for visual hierarchy */}
+            <div 
+              className="absolute left-0 top-0 bottom-0 border-l border-app-border/50"
+              style={{ marginLeft: `${14 + depth * 12}px` }}
+            />
+            {item.children.length === 0 ? (
+              <div 
+                className="py-2 text-xs text-app-text-dim italic"
+                style={{ paddingLeft: `${20 + depth * 12}px` }}
+              >
+                Drop items here
+              </div>
+            ) : (
+              item.children.map(child => renderItem(child, section, depth + 1))
+            )}
           </div>
         )}
       </div>
@@ -342,8 +540,31 @@ export default function InnerSidebar({
     >
       <div className="p-2">
         {/* Favorites Section */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+        <div 
+          className="mb-4"
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (draggedItem) {
+              setDragOverTarget({ type: 'section', id: 'favorites' })
+            }
+          }}
+          onDragLeave={() => {
+            if (dragOverTarget?.id === 'favorites') {
+              setDragOverTarget(null)
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            handleDropOnSection('favorites')
+          }}
+        >
+          <div 
+            className={`flex items-center justify-between px-2 py-1.5 mb-1 rounded transition-colors ${
+              dragOverTarget?.type === 'section' && dragOverTarget.id === 'favorites' 
+                ? 'bg-yellow-500/20 ring-1 ring-yellow-500/50' 
+                : ''
+            }`}
+          >
             <button
               onClick={() => {
                 if (!disabled) setFavoritesCollapsed(!favoritesCollapsed)
@@ -363,14 +584,6 @@ export default function InnerSidebar({
 
             {!favoritesCollapsed && (
               <div className="flex items-center gap-1">
-                <button
-                  onClick={() => handleAddSnippet('favorites')}
-                  className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title={disabled ? disableTitle : 'Add snippet'}
-                  disabled={disabled}
-                >
-                  <Plus className="w-3.5 h-3.5 text-app-text-dim" />
-                </button>
                 <button
                   onClick={() => handleAddFolder('favorites')}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
@@ -397,8 +610,30 @@ export default function InnerSidebar({
         </div>
 
         {/* Templates Section */}
-        <div>
-          <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (draggedItem) {
+              setDragOverTarget({ type: 'section', id: 'templates' })
+            }
+          }}
+          onDragLeave={() => {
+            if (dragOverTarget?.id === 'templates') {
+              setDragOverTarget(null)
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            handleDropOnSection('templates')
+          }}
+        >
+          <div 
+            className={`flex items-center justify-between px-2 py-1.5 mb-1 rounded transition-colors ${
+              dragOverTarget?.type === 'section' && dragOverTarget.id === 'templates' 
+                ? 'bg-blue-500/20 ring-1 ring-blue-500/50' 
+                : ''
+            }`}
+          >
             <button
               onClick={() => {
                 if (!disabled) setTemplatesCollapsed(!templatesCollapsed)
@@ -419,14 +654,6 @@ export default function InnerSidebar({
             {!templatesCollapsed && (
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => handleAddSnippet('templates')}
-                  className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title={disabled ? disableTitle : 'Add snippet'}
-                  disabled={disabled}
-                >
-                  <Plus className="w-3.5 h-3.5 text-app-text-dim" />
-                </button>
-                <button
                   onClick={() => handleAddFolder('templates')}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
                   title={disabled ? disableTitle : 'Add folder'}
@@ -440,14 +667,43 @@ export default function InnerSidebar({
 
           {!templatesCollapsed && (
             <div className="space-y-0.5">
-              {templates.map(item => renderItem(item, 'templates'))}
+              {templates.length === 0 ? (
+                <div className="px-2 py-4 text-xs text-app-text-dim text-center">
+                  No templates yet
+                </div>
+              ) : (
+                templates.map(item => renderItem(item, 'templates'))
+              )}
             </div>
           )}
         </div>
 
         {/* Private Section */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+        <div 
+          className="mt-4"
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (draggedItem) {
+              setDragOverTarget({ type: 'section', id: 'private' })
+            }
+          }}
+          onDragLeave={() => {
+            if (dragOverTarget?.id === 'private') {
+              setDragOverTarget(null)
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            handleDropOnSection('private')
+          }}
+        >
+          <div 
+            className={`flex items-center justify-between px-2 py-1.5 mb-1 rounded transition-colors ${
+              dragOverTarget?.type === 'section' && dragOverTarget.id === 'private' 
+                ? 'bg-purple-500/20 ring-1 ring-purple-500/50' 
+                : ''
+            }`}
+          >
             <button
               onClick={() => {
                 if (!disabled) setPrivateCollapsed(!privateCollapsed)
@@ -467,14 +723,6 @@ export default function InnerSidebar({
 
             {!privateCollapsed && (
               <div className="flex items-center gap-1">
-                <button
-                  onClick={() => handleAddSnippet('private')}
-                  className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title={disabled ? disableTitle : 'Add snippet'}
-                  disabled={disabled}
-                >
-                  <Plus className="w-3.5 h-3.5 text-app-text-dim" />
-                </button>
                 <button
                   onClick={() => handleAddFolder('private')}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"

@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Save, Star, ChevronDown, Camera, Copy, AlertCircle, Info, FileText, Download, Database, CheckCircle, Lock, ArrowLeftRight, GitBranch, Eye, List, Terminal, X, Plus, FileCode } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { Save, Star, ChevronDown, Camera, Copy, AlertCircle, Info, FileText, Download, Database, CheckCircle, Lock, ArrowLeftRight, GitBranch, Eye, List, Terminal, X, Plus, FileCode, Folder, ChevronRight } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import InnerSidebar from './InnerSidebar'
 import { executeQuery, executeCompareQuery, checkpointCompareBranches, closeCompareBranches, getBranches, getTables, getTableInfo, createMigration, createSnapshot } from '@/lib/api'
 import { useAppContext } from '@/contexts/AppContext'
+import { toast } from 'react-toastify'
 import {
   SQLCompletionProvider,
   SQLSignatureHelpProvider,
@@ -157,6 +158,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   // Save modal state
   const [saveModal, setSaveModal] = useState<{ type: 'favorite' | 'template' | 'private'; sql: string } | null>(null)
   const [saveItemName, setSaveItemName] = useState('')
+  const [selectedFolderPath, setSelectedFolderPath] = useState<string[]>([]) // Array of folder IDs for nested selection
   const [tabContextMenu, setTabContextMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
 
   // Persist tabs to localStorage
@@ -173,17 +175,26 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
-        const activeTab = queryTabs.find(t => t.id === activeQueryTabId)
-        if (activeTab?.sql) {
-          // Show save modal with 'private' as default
-          setSaveModal({ type: 'private', sql: activeTab.sql })
-          setSaveItemName(activeTab.name !== 'Untitled query' ? activeTab.name : '')
+        // Block save in compare mode
+        if (compareEnabled) {
+          toast.warning('Save is disabled in Compare Mode')
+          return
         }
+        const activeTab = queryTabs.find(t => t.id === activeQueryTabId)
+        // Prevent saving empty queries
+        if (!activeTab?.sql?.trim()) {
+          toast.error('Cannot save empty query')
+          return
+        }
+        // Show save modal with 'private' as default
+        setSaveModal({ type: 'private', sql: activeTab.sql })
+        setSaveItemName(activeTab.name !== 'Untitled query' ? activeTab.name : '')
+        setSelectedFolderPath([])
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [queryTabs, activeQueryTabId])
+  }, [queryTabs, activeQueryTabId, compareEnabled])
 
   // Close tab context menu on click outside
   useEffect(() => {
@@ -193,27 +204,97 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     return () => window.removeEventListener('click', handleClick)
   }, [tabContextMenu])
 
+  // Helper to get folders at a specific level
+  const getFoldersAtPath = useCallback((items: any[], pathIndex: number): any[] => {
+    if (pathIndex === 0) {
+      return items.filter(item => item.type === 'folder')
+    }
+    // Navigate to the current folder
+    let currentItems = items
+    for (let i = 0; i < pathIndex; i++) {
+      const folderId = selectedFolderPath[i]
+      const folder = currentItems.find(item => item.id === folderId && item.type === 'folder')
+      if (folder && folder.children) {
+        currentItems = folder.children
+      } else {
+        return []
+      }
+    }
+    return currentItems.filter(item => item.type === 'folder')
+  }, [selectedFolderPath])
+
+  // Get current section items based on save type
+  const getCurrentSectionItems = useCallback((type: 'favorite' | 'template' | 'private'): any[] => {
+    if (type === 'private') return privateItems
+    if (type === 'favorite') {
+      const saved = localStorage.getItem('localdb-favorites')
+      return saved ? JSON.parse(saved) : []
+    }
+    if (type === 'template') {
+      const saved = localStorage.getItem('localdb-templates')
+      return saved ? JSON.parse(saved) : []
+    }
+    return []
+  }, [privateItems])
+
+  // Add item to a specific folder path
+  const addItemToPath = useCallback((items: any[], newItem: any, folderPath: string[]): any[] => {
+    if (folderPath.length === 0) {
+      return [...items, newItem]
+    }
+
+    return items.map(item => {
+      if (item.id === folderPath[0] && item.type === 'folder') {
+        const remainingPath = folderPath.slice(1)
+        return {
+          ...item,
+          children: addItemToPath(item.children || [], newItem, remainingPath)
+        }
+      }
+      return item
+    })
+  }, [])
+
   // Handle save to different sections
   const handleSaveAs = useCallback((type: 'favorite' | 'template' | 'private') => {
     if (!saveModal) return
     const name = saveItemName.trim()
-    if (!name) return
+    if (!name) {
+      toast.error('Please enter a name')
+      return
+    }
+
+    const newItem = { id: `${type.slice(0, 4)}-${Date.now()}`, label: name, sql: saveModal.sql, type: 'file' as const }
 
     if (type === 'favorite') {
-      addFavorite(name, saveModal.sql)
+      const saved = localStorage.getItem('localdb-favorites')
+      const favorites = saved ? JSON.parse(saved) : []
+      const updated = addItemToPath(favorites, newItem, selectedFolderPath)
+      localStorage.setItem('localdb-favorites', JSON.stringify(updated))
+      window.dispatchEvent(new Event('storage'))
     } else if (type === 'template') {
       const saved = localStorage.getItem('localdb-templates')
       const templates = saved ? JSON.parse(saved) : []
-      templates.push({ id: `tmpl-${Date.now()}`, label: name, sql: saveModal.sql, type: 'snippet' })
-      localStorage.setItem('localdb-templates', JSON.stringify(templates))
+      const updated = addItemToPath(templates, newItem, selectedFolderPath)
+      localStorage.setItem('localdb-templates', JSON.stringify(updated))
       window.dispatchEvent(new Event('storage'))
     } else if (type === 'private') {
-      setPrivateItems(prev => [...prev, { id: `priv-${Date.now()}`, label: name, sql: saveModal.sql, type: 'file' }])
+      setPrivateItems(prev => addItemToPath(prev, newItem, selectedFolderPath))
     }
 
+    // Update the current tab name if it's Untitled query
+    const currentTab = queryTabs.find(t => t.id === activeQueryTabId)
+    if (currentTab && currentTab.name === 'Untitled query') {
+      setQueryTabs(prev => prev.map(tab => 
+        tab.id === activeQueryTabId ? { ...tab, name } : tab
+      ))
+    }
+
+    toast.success(`Saved to ${type}`)
     setSaveModal(null)
     setSaveItemName('')
-  }, [saveModal, saveItemName, addFavorite])
+    setSelectedFolderPath([])
+  }, [saveModal, saveItemName, selectedFolderPath, addItemToPath, queryTabs, activeQueryTabId])
 
   // Sync current tab SQL with editor
   const activeQueryTab = queryTabs.find(t => t.id === activeQueryTabId) || queryTabs[0]
@@ -1204,10 +1285,20 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
         disabled={compareEnabled} 
         privateItems={privateItems}
         onPrivateItemsChange={setPrivateItems}
-        onPrivateItemClick={(item) => {
+        onOpenFile={(item, section) => {
           if (item.sql) {
-            // Update active tab with the selected SQL
-            updateCurrentTabSQL(item.sql)
+            // Check if file is already open in a tab
+            const existingTab = queryTabs.find(t => t.name === item.label && t.sql === item.sql)
+            if (existingTab) {
+              // Switch to existing tab
+              setActiveQueryTabId(existingTab.id)
+            } else {
+              // Open file in a new tab
+              const newId = `tab-${Date.now()}`
+              const newTab: QueryTab = { id: newId, name: item.label, sql: item.sql }
+              setQueryTabs(prev => [...prev, newTab])
+              setActiveQueryTabId(newId)
+            }
           }
         }}
       />
@@ -2485,10 +2576,14 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
           <button
             onClick={() => {
               const tab = queryTabs.find(t => t.id === tabContextMenu.tabId)
-              if (tab?.sql) {
-                setSaveModal({ type: 'favorite', sql: tab.sql })
-                setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              if (!tab?.sql?.trim()) {
+                toast.error('Cannot save empty query')
+                setTabContextMenu(null)
+                return
               }
+              setSaveModal({ type: 'favorite', sql: tab.sql })
+              setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              setSelectedFolderPath([])
               setTabContextMenu(null)
             }}
             className="w-full px-3 py-2 text-left text-sm hover:bg-app-sidebar-hover flex items-center gap-2"
@@ -2499,10 +2594,14 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
           <button
             onClick={() => {
               const tab = queryTabs.find(t => t.id === tabContextMenu.tabId)
-              if (tab?.sql) {
-                setSaveModal({ type: 'template', sql: tab.sql })
-                setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              if (!tab?.sql?.trim()) {
+                toast.error('Cannot save empty query')
+                setTabContextMenu(null)
+                return
               }
+              setSaveModal({ type: 'template', sql: tab.sql })
+              setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              setSelectedFolderPath([])
               setTabContextMenu(null)
             }}
             className="w-full px-3 py-2 text-left text-sm hover:bg-app-sidebar-hover flex items-center gap-2"
@@ -2513,10 +2612,14 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
           <button
             onClick={() => {
               const tab = queryTabs.find(t => t.id === tabContextMenu.tabId)
-              if (tab?.sql) {
-                setSaveModal({ type: 'private', sql: tab.sql })
-                setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              if (!tab?.sql?.trim()) {
+                toast.error('Cannot save empty query')
+                setTabContextMenu(null)
+                return
               }
+              setSaveModal({ type: 'private', sql: tab.sql })
+              setSaveItemName(tab.name !== 'Untitled query' ? tab.name : '')
+              setSelectedFolderPath([])
               setTabContextMenu(null)
             }}
             className="w-full px-3 py-2 text-left text-sm hover:bg-app-sidebar-hover flex items-center gap-2"
@@ -2529,7 +2632,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
 
       {/* Save Modal */}
       {saveModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setSaveModal(null)}>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { setSaveModal(null); setSelectedFolderPath([]); }}>
           <div className="bg-app-sidebar border border-app-border rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
               {saveModal.type === 'favorite' && <Star className="w-5 h-5 text-yellow-400" />}
@@ -2555,6 +2658,84 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
               />
             </div>
 
+            {/* Folder selection dropdowns */}
+            {(() => {
+              const sectionItems = getCurrentSectionItems(saveModal.type)
+              const foldersAtRoot = sectionItems.filter(item => item.type === 'folder')
+              
+              if (foldersAtRoot.length === 0) return null
+
+              // Build nested folder dropdowns
+              const dropdowns: React.ReactNode[] = []
+              
+              // Root folder dropdown
+              dropdowns.push(
+                <select
+                  key="root"
+                  value={selectedFolderPath[0] || ''}
+                  onChange={(e) => {
+                    if (e.target.value === '') {
+                      setSelectedFolderPath([])
+                    } else {
+                      setSelectedFolderPath([e.target.value])
+                    }
+                  }}
+                  className="bg-app-bg border border-app-border rounded px-2 py-1.5 text-xs focus:outline-none focus:border-app-accent min-w-[100px]"
+                >
+                  <option value="">Root</option>
+                  {foldersAtRoot.map(folder => (
+                    <option key={folder.id} value={folder.id}>{folder.label}</option>
+                  ))}
+                </select>
+              )
+
+              // Add nested dropdowns for each selected folder level
+              let currentItems = sectionItems
+              for (let i = 0; i < selectedFolderPath.length; i++) {
+                const folderId = selectedFolderPath[i]
+                const folder = currentItems.find(item => item.id === folderId && item.type === 'folder')
+                
+                if (!folder?.children) break
+                
+                const subfolders = folder.children.filter((item: any) => item.type === 'folder')
+                if (subfolders.length === 0) break
+
+                const pathIndex = i + 1
+                dropdowns.push(
+                  <ChevronRight key={`arrow-${i}`} className="w-4 h-4 text-app-text-dim flex-shrink-0" />,
+                  <select
+                    key={`level-${pathIndex}`}
+                    value={selectedFolderPath[pathIndex] || ''}
+                    onChange={(e) => {
+                      if (e.target.value === '') {
+                        setSelectedFolderPath(prev => prev.slice(0, pathIndex))
+                      } else {
+                        setSelectedFolderPath(prev => [...prev.slice(0, pathIndex), e.target.value])
+                      }
+                    }}
+                    className="bg-app-bg border border-app-border rounded px-2 py-1.5 text-xs focus:outline-none focus:border-app-accent min-w-[100px]"
+                  >
+                    <option value="">{folder.label}</option>
+                    {subfolders.map((subfolder: any) => (
+                      <option key={subfolder.id} value={subfolder.id}>{subfolder.label}</option>
+                    ))}
+                  </select>
+                )
+
+                currentItems = folder.children
+              }
+
+              return (
+                <div className="mb-4">
+                  <label className="block text-sm text-app-text-dim mb-2">Location (optional)</label>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <Folder className="w-4 h-4 text-app-text-dim flex-shrink-0 mr-1" />
+                    {dropdowns}
+                  </div>
+                </div>
+              )
+            })()}
+
             <div className="mb-4">
               <label className="block text-sm text-app-text-dim mb-2">Preview</label>
               <div className="bg-app-bg border border-app-border rounded p-2 text-xs font-mono max-h-24 overflow-auto">
@@ -2567,21 +2748,21 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
               <label className="block text-sm text-app-text-dim mb-2">Save to</label>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setSaveModal({ ...saveModal, type: 'favorite' })}
+                  onClick={() => { setSaveModal({ ...saveModal, type: 'favorite' }); setSelectedFolderPath([]); }}
                   className={`flex-1 px-3 py-2 text-xs rounded flex items-center justify-center gap-2 transition-colors ${saveModal.type === 'favorite' ? 'bg-yellow-500/20 border border-yellow-500/50 text-yellow-400' : 'bg-app-bg border border-app-border hover:bg-app-sidebar-hover'}`}
                 >
                   <Star className="w-3.5 h-3.5" />
                   Favorite
                 </button>
                 <button
-                  onClick={() => setSaveModal({ ...saveModal, type: 'template' })}
+                  onClick={() => { setSaveModal({ ...saveModal, type: 'template' }); setSelectedFolderPath([]); }}
                   className={`flex-1 px-3 py-2 text-xs rounded flex items-center justify-center gap-2 transition-colors ${saveModal.type === 'template' ? 'bg-blue-500/20 border border-blue-500/50 text-blue-400' : 'bg-app-bg border border-app-border hover:bg-app-sidebar-hover'}`}
                 >
                   <FileText className="w-3.5 h-3.5" />
                   Template
                 </button>
                 <button
-                  onClick={() => setSaveModal({ ...saveModal, type: 'private' })}
+                  onClick={() => { setSaveModal({ ...saveModal, type: 'private' }); setSelectedFolderPath([]); }}
                   className={`flex-1 px-3 py-2 text-xs rounded flex items-center justify-center gap-2 transition-colors ${saveModal.type === 'private' ? 'bg-purple-500/20 border border-purple-500/50 text-purple-400' : 'bg-app-bg border border-app-border hover:bg-app-sidebar-hover'}`}
                 >
                   <Lock className="w-3.5 h-3.5" />
@@ -2592,7 +2773,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
 
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => setSaveModal(null)}
+                onClick={() => { setSaveModal(null); setSelectedFolderPath([]); }}
                 className="px-4 py-2 text-sm bg-app-sidebar-active hover:bg-app-sidebar-hover rounded transition-colors"
               >
                 Cancel

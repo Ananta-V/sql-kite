@@ -9,16 +9,16 @@ import { spawn } from 'child_process'
 import http from 'http'
 import open from 'open'
 import { findFreePort } from '../utils/port-finder.js'
-import { ensureLocalDbDirs, LOGS_DIR } from '../utils/paths.js'
+import { ensureSqlKiteDirs, LOGS_DIR } from '../utils/paths.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default async function importCommand(dbPath) {
-  ensureLocalDbDirs()
+  ensureSqlKiteDirs()
   if (!dbPath) {
     console.error(chalk.red('✗ Error: Database path is required'))
-    console.log(chalk.dim('Usage: localdb import <path-to-database>'))
-    console.log(chalk.dim('   Or: localdb open <path-to-database>'))
+    console.log(chalk.dim('Usage: npm run sql-kite import <path-to-database>'))
+    console.log(chalk.dim('   Or: npm run sql-kite open <path-to-database>'))
     process.exit(1)
   }
 
@@ -137,12 +137,12 @@ export default async function importCommand(dbPath) {
 
   // Store import session data
   const homeDir = process.env.HOME || process.env.USERPROFILE
-  const localdbDir = join(homeDir, '.localdb')
-  const sessionFile = join(localdbDir, 'import-pending.json')
+  const sqlKiteDir = join(homeDir, '.sql-kite')
+  const sessionFile = join(sqlKiteDir, 'import-pending.json')
 
-  // Ensure .localdb directory exists
-  if (!existsSync(localdbDir)) {
-    mkdirSync(localdbDir, { recursive: true })
+  // Ensure .sql-kite directory exists
+  if (!existsSync(sqlKiteDir)) {
+    mkdirSync(sqlKiteDir, { recursive: true })
   }
 
   const importSession = {

@@ -81,14 +81,35 @@ export async function getSnapshots() {
   return res.json()
 }
 
-export async function createSnapshot(name?: string) {
+export interface CreateSnapshotParams {
+  name: string
+  description?: string
+  type?: 'manual' | 'auto-before-migration' | 'auto-before-promote' | 'import-baseline' | 'auto-risky-query'
+}
+
+export async function createSnapshot(params: CreateSnapshotParams | string) {
+  // Support both old (string) and new (object) signature
+  const body = typeof params === 'string' 
+    ? { name: params }
+    : params
+  
   const res = await fetch(`${API_BASE}/snapshots`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
+    body: JSON.stringify(body)
   })
-  if (!res.ok) throw new Error('Failed to create snapshot')
-  return res.json()
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Failed to create snapshot')
+  return data
+}
+
+export async function deleteSnapshot(id: number) {
+  const res = await fetch(`${API_BASE}/snapshots/${id}`, {
+    method: 'DELETE'
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Failed to delete snapshot')
+  return data
 }
 
 export async function restoreSnapshot(id: number) {
@@ -242,16 +263,10 @@ export async function getBranchStats(name: string) {
   return res.json()
 }
 
-// Snapshot APIs (updated for branches)
-export async function createSnapshotWithDesc(name: string, description?: string) {
-  const res = await fetch(`${API_BASE}/snapshots`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description })
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error || 'Failed to create snapshot')
-  return data
+// Snapshot APIs (updated for branches) - use createSnapshot instead
+// Keeping for backwards compatibility
+export async function createSnapshotWithDesc(name: string, description?: string, type?: string) {
+  return createSnapshot({ name, description, type: type as any })
 }
 
 // Migration API (create migration)

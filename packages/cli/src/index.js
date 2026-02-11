@@ -13,8 +13,8 @@ import importServerCommand from './commands/import-server.js';
 const program = new Command();
 
 program
-  .name('localdb')
-  .description('Local SQLite database platform with Studio UI')
+  .name('sql-kite')
+  .description('SQL Kite - Local SQLite database platform with Studio UI')
   .version('1.0.0');
 
 program

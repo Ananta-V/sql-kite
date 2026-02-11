@@ -5,6 +5,8 @@ import { GitBranch, Plus, Trash2, Lock, Loader, ArrowRight } from 'lucide-react'
 import { getBranches, deleteBranch, switchBranch } from '@/lib/api'
 import { format } from 'date-fns'
 import BranchPromoteModal from './BranchPromoteModal'
+import { useAppContext } from '@/contexts/AppContext'
+import { toast } from 'react-toastify'
 
 interface Branch {
   name: string
@@ -22,6 +24,7 @@ interface BranchesPageProps {
 }
 
 export default function BranchesPage({ currentBranch, onBranchChange, onCreateClick }: BranchesPageProps) {
+  const { branchVersion, incrementBranchVersion } = useAppContext()
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -29,7 +32,7 @@ export default function BranchesPage({ currentBranch, onBranchChange, onCreateCl
 
   useEffect(() => {
     loadBranches()
-  }, [])
+  }, [branchVersion])
 
   async function loadBranches() {
     try {
@@ -51,26 +54,35 @@ export default function BranchesPage({ currentBranch, onBranchChange, onCreateCl
 
   async function handleDelete(branchName: string) {
     if (branchName === 'main') {
-      alert('Cannot delete main branch')
+      toast.error('Cannot delete main branch')
       return
     }
 
-    if (branchName === currentBranch) {
-      alert('Cannot delete current branch. Switch to another branch first.')
-      return
-    }
+    const isDeletingCurrent = branchName === currentBranch
 
-    if (!confirm(`Are you sure you want to delete branch "${branchName}"?\n\nThis will remove the branch metadata, but the database file will be kept for safety.`)) {
+    if (!confirm(`Are you sure you want to delete branch "${branchName}"?\n\nThis will remove the branch metadata, but the database file will be kept for safety.${isDeletingCurrent ? '\n\nYou will be switched to main branch.' : ''}`)) {
       return
     }
 
     try {
       setDeleting(branchName)
+      
+      // If deleting current branch, switch to main first
+      if (isDeletingCurrent) {
+        await switchBranch('main')
+        incrementBranchVersion()
+      }
+      
       await deleteBranch(branchName)
       await loadBranches()
+      toast.success(`Branch "${branchName}" deleted`)
+      
+      if (isDeletingCurrent) {
+        onBranchChange?.() // Notify parent about branch change
+      }
     } catch (error: any) {
       console.error('Failed to delete branch:', error)
-      alert(`Failed to delete branch: ${error.message}`)
+      toast.error(`Failed to delete branch: ${error.message}`)
     } finally {
       setDeleting(null)
     }
@@ -191,9 +203,9 @@ export default function BranchesPage({ currentBranch, onBranchChange, onCreateCl
                               </button>
                               <button
                                 onClick={() => handleDelete(branch.name)}
-                                disabled={deleting !== null || branch.is_current}
+                                disabled={deleting !== null}
                                 className="p-1.5 text-red-400 hover:bg-red-500/10 disabled:opacity-50 rounded transition-colors"
-                                title={branch.is_current ? 'Cannot delete current branch' : 'Delete branch'}
+                                title={branch.is_current ? 'Delete branch (will switch to main)' : 'Delete branch'}
                               >
                                 {deleting === branch.name ? (
                                   <Loader className="w-4 h-4 animate-spin" />

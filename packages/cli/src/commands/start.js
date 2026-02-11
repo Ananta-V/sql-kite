@@ -45,7 +45,7 @@ async function waitForServer(port, maxAttempts = 30) {
 export async function startCommand(name) {
   if (!projectExists(name)) {
     console.log(chalk.red(`✗ Project "${name}" does not exist`));
-    console.log(chalk.dim(`   Run: ${chalk.cyan(`localdb new ${name}`)}`));
+    console.log(chalk.dim(`   Run: ${chalk.cyan(`npm run sql-kite new ${name}`)}`));
     process.exit(1);
   }
   

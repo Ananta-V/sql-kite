@@ -13,7 +13,7 @@ export async function openCommand(name) {
   
   if (!existsSync(serverInfoPath)) {
     console.log(chalk.yellow(`⚠ Project "${name}" is not running`));
-    console.log(chalk.dim(`   Run: ${chalk.cyan(`localdb start ${name}`)}`));
+    console.log(chalk.dim(`   Run: ${chalk.cyan(`npm run sql-kite start ${name}`)}`));
     return;
   }
   

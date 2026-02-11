@@ -26,20 +26,27 @@ interface AppContextType {
   // Project Info
   projectInfo: any
   setProjectInfo: (info: any) => void
+
+  // Branch change tracking - increment to trigger refetch in listening components
+  branchVersion: number
+  incrementBranchVersion: () => void
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [projectInfo, setProjectInfo] = useState<any>(null)
+  const [branchVersion, setBranchVersion] = useState(0)
   const [editorState, setEditorStateInternal] = useState<EditorState>({
     sql: '-- Write your SQL query here\n\n-- Press Ctrl+Space for autocomplete\n',
     activeTab: 'result'
   })
 
+  const incrementBranchVersion = () => setBranchVersion(v => v + 1)
+
   // Load SQL from localStorage on mount
   useEffect(() => {
-    const savedSQL = localStorage.getItem('localdb-sql-editor-content')
+    const savedSQL = localStorage.getItem('sql-kite-sql-editor-content')
     if (savedSQL) {
       setEditorStateInternal(prev => ({ ...prev, sql: savedSQL }))
     }
@@ -48,12 +55,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Save SQL to localStorage whenever it changes
   const setEditorState = (state: EditorState) => {
     setEditorStateInternal(state)
-    localStorage.setItem('localdb-sql-editor-content', state.sql)
+    localStorage.setItem('sql-kite-sql-editor-content', state.sql)
   }
 
   const updateSQL = (sql: string) => {
     setEditorStateInternal(prev => ({ ...prev, sql }))
-    localStorage.setItem('localdb-sql-editor-content', sql)
+    localStorage.setItem('sql-kite-sql-editor-content', sql)
   }
 
   const updateActiveTab = (tab: 'result' | 'errors' | 'info') => {
@@ -61,7 +68,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   const addFavorite = (name: string, sql: string) => {
-    const savedFavorites = localStorage.getItem('localdb-favorites')
+    const savedFavorites = localStorage.getItem('sql-kite-favorites')
     let favorites = []
 
     if (savedFavorites) {
@@ -80,7 +87,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     favorites.push(newFavorite)
-    localStorage.setItem('localdb-favorites', JSON.stringify(favorites))
+    localStorage.setItem('sql-kite-favorites', JSON.stringify(favorites))
 
     // Trigger storage event for InnerSidebar to reload
     window.dispatchEvent(new Event('storage'))
@@ -95,7 +102,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateActiveTab,
         addFavorite,
         projectInfo,
-        setProjectInfo
+        setProjectInfo,
+        branchVersion,
+        incrementBranchVersion
       }}
     >
       {children}

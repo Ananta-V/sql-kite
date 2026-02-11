@@ -230,5 +230,30 @@ export function migrateMetaDb(metaPath) {
     console.log('✓ Meta DB migrated to v1');
   }
 
+  // Migration v1 -> v2: Add type column to snapshots
+  if (version < 2) {
+    console.log('Migrating meta DB to v2 (snapshot types)...');
+
+    // Add type column to snapshots if it doesn't exist
+    try {
+      const snapshotsInfo = db.pragma('table_info(snapshots)');
+      const hasTypeColumn = snapshotsInfo.some(col => col.name === 'type');
+
+      if (!hasTypeColumn) {
+        console.log('  Adding type column to snapshots table...');
+        db.exec(`ALTER TABLE snapshots ADD COLUMN type TEXT DEFAULT 'manual';`);
+      }
+    } catch (e) {
+      console.log('  Error adding type column:', e.message);
+    }
+
+    // Update schema version
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')
+    `).run();
+
+    console.log('✓ Meta DB migrated to v2');
+  }
+
   db.close();
 }

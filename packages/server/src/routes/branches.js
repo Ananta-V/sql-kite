@@ -419,14 +419,15 @@ export default async function branchesRoutes(fastify, options) {
         const snapshotStats = statSync(snapshotPath);
 
         const result = metaDb.prepare(`
-          INSERT INTO snapshots (branch, filename, name, size, description)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO snapshots (branch, filename, name, size, description, type)
+          VALUES (?, ?, ?, ?, ?, ?)
         `).run(
           targetBranch,
           snapshotFilename,
-          `Pre-promote snapshot`,
+          `Before promoting ${sourceBranch}`,
           snapshotStats.size,
-          `Automatic snapshot before promoting ${sourceBranch} to ${targetBranch}`
+          `Automatic snapshot before promoting ${sourceBranch} to ${targetBranch}`,
+          'auto-before-promote'
         );
 
         snapshotId = result.lastInsertRowid;

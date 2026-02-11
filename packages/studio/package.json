@@ -1,5 +1,5 @@
 {
-  "name": "@localdb/studio",
+  "name": "@sql-kite/studio",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -17,6 +17,7 @@
     "next": "^16.1.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-toastify": "^11.0.5",
     "reactflow": "^11.11.4"
   },
   "devDependencies": {

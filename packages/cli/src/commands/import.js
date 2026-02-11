@@ -17,8 +17,8 @@ export default async function importCommand(dbPath) {
   ensureSqlKiteDirs()
   if (!dbPath) {
     console.error(chalk.red('✗ Error: Database path is required'))
-    console.log(chalk.dim('Usage: sql-kite import <path-to-database>'))
-    console.log(chalk.dim('   Or: sql-kite open <path-to-database>'))
+    console.log(chalk.dim('Usage: npm run sql-kite import <path-to-database>'))
+    console.log(chalk.dim('   Or: npm run sql-kite open <path-to-database>'))
     process.exit(1)
   }
 

@@ -40,9 +40,11 @@ export default async function exportRoutes(fastify, options) {
             // Open main database to check health
             const mainDb = new Database(mainDbPath, { readonly: true });
             
-            // Check integrity
-            const integrityCheck = mainDb.prepare('PRAGMA integrity_check').get();
-            databaseHealthy = integrityCheck?.integrity_check === 'ok';
+            // Check integrity - PRAGMA returns object with dynamic key
+            const integrityResult = mainDb.prepare('PRAGMA integrity_check').get();
+            // The result could be { integrity_check: 'ok' } or just check the first value
+            const integrityValue = Object.values(integrityResult || {})[0];
+            databaseHealthy = integrityValue === 'ok';
 
             // Get table count
             const tables = mainDb.prepare(`

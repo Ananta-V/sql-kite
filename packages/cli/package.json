@@ -3,6 +3,7 @@
   "version": "1.0.2",
   "description": "SQL-Kite CLI — Local-first SQLite workspace with branches, migrations and snapshots.",
   "type": "module",
+  "preferGlobal": true,
   "bin": {
     "sql-kite": "./bin/sql-kite.js"
   },

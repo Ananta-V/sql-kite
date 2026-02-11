@@ -140,6 +140,22 @@ A clean local interface for:
 
 ---
 
+## Screenshots
+
+### SQL Editor
+
+Execute queries, save templates, and export results with full SQL syntax highlighting.
+
+![SQL Editor](screenshots/sql-editor.png)
+
+### Database Schema Viewer
+
+Browse tables, inspect columns, constraints, indexes, and relationships in a clean interface.
+
+![Database Schema](screenshots/database-schema.png)
+
+---
+
 ## Zero-Cloud Architecture
 
 SQL Kite runs **entirely on your machine**.
@@ -163,11 +179,22 @@ SQL Kite runs **entirely on your machine**.
 * Node.js 18+
 * npm
 
-### Install
+### Install Globally (Recommended)
+
+Install SQL Kite globally to use it from anywhere:
 
 ```bash
 npm install -g sql-kite
 ```
+
+After installation, you can use `sql-kite` commands directly:
+
+```bash
+sql-kite new my-db
+sql-kite start my-db
+```
+
+> **Note:** Use global installation (`-g` flag) for CLI tools. After installing globally, run commands directly as `sql-kite <command>`, not `npm run sql-kite <command>`.
 
 ---
 
@@ -178,13 +205,13 @@ npm install -g sql-kite
 ### 1) Create a project
 
 ```bash
-npm run sql-kite new my-db
+sql-kite new my-db
 ```
 
 ### 2) Start the studio
 
 ```bash
-npm run sql-kite start my-db
+sql-kite start my-db
 ```
 
 Your browser opens automatically.
@@ -194,7 +221,7 @@ Your browser opens automatically.
 ### Import an existing database
 
 ```bash
-npm run sql-kite import ./database.db
+sql-kite import ./database.db
 ```
 
 > SQL Kite will safely adopt the file into a managed workspace.
@@ -205,15 +232,15 @@ npm run sql-kite import ./database.db
 
 | Command                            | Description     |
 | ---------------------------------- | --------------- |
-| `npm run sql-kite new <name>`      | Create project  |
-| `npm run sql-kite import <path>`   | Import database |
-| `npm run sql-kite start <name>`    | Launch Studio   |
-| `npm run sql-kite stop <name>`     | Stop server     |
-| `npm run sql-kite open <name>`     | Open UI         |
-| `npm run sql-kite list`            | List projects   |
-| `npm run sql-kite delete <name>`   | Remove project  |
-| `npm run sql-kite ports`           | Show port usage |
-| `npm run sql-kite init`            | Scaffold app database layer |
+| `sql-kite new <name>`      | Create project  |
+| `sql-kite import <path>`   | Import database |
+| `sql-kite start <name>`    | Launch Studio   |
+| `sql-kite stop <name>`     | Stop server     |
+| `sql-kite open <name>`     | Open UI         |
+| `sql-kite list`            | List projects   |
+| `sql-kite delete <name>`   | Remove project  |
+| `sql-kite ports`           | Show port usage |
+| `sql-kite init`            | Scaffold app database layer |
 
 ---
 
@@ -227,7 +254,7 @@ SQL Kite provides a database integration layer with automatic dev/production swi
 
 ```bash
 cd your-app-project
-npm run sql-kite init
+sql-kite init
 ```
 
 This creates:
@@ -385,14 +412,14 @@ npm run build:studio
 ### Port in use
 
 ```bash
-npm run sql-kite ports
+sql-kite ports
 ```
 
 ### Restart project
 
 ```bash
-npm run sql-kite stop my-db
-npm run sql-kite start my-db
+sql-kite stop my-db
+sql-kite start my-db
 ```
 
 ### Import fails

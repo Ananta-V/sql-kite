@@ -12,6 +12,8 @@ import {
   SQLSignatureHelpProvider,
   SQLHoverProvider
 } from '@/lib/sql-autocomplete'
+import SnapshotCreateModal from './SnapshotCreateModal'
+import RiskyQueryModal, { detectRiskyQuery } from './RiskyQueryModal'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
@@ -87,7 +89,14 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   const [selectedSQL, setSelectedSQL] = useState('')
   const [showSnapshotModal, setShowSnapshotModal] = useState(false)
   const [snapshotName, setSnapshotName] = useState('')
+  const [snapshotDescription, setSnapshotDescription] = useState('')
   const [creatingSnapshot, setCreatingSnapshot] = useState(false)
+  const [riskyQueryModal, setRiskyQueryModal] = useState<{
+    isOpen: boolean
+    sql: string
+    level: 'high' | 'medium'
+    reason: string
+  } | null>(null)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [lastQueryType, setLastQueryType] = useState<string>('unknown')
   const [lastExecutedSQL, setLastExecutedSQL] = useState<string>('')
@@ -936,7 +945,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter
       ],
       run: () => {
-        handleExecute()
+        checkAndExecute()
       }
     })
 
@@ -950,9 +959,9 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
         const selection = editor.getSelection()
         const selectedText = editor.getModel().getValueInRange(selection)
         if (selectedText.trim()) {
-          handleExecute(selectedText)
+          checkAndExecute(selectedText)
         } else {
-          handleExecute()
+          checkAndExecute()
         }
       }
     })
@@ -973,9 +982,32 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     loadSchemaForAutocomplete()
   }
 
+  // Check for risky query before executing
+  function checkAndExecute(customSql?: string) {
+    const queryToRun = customSql || editorState.sql
+    if (!queryToRun.trim()) return
+
+    const risk = detectRiskyQuery(queryToRun)
+    if (risk && risk.isRisky) {
+      setRiskyQueryModal({
+        isOpen: true,
+        sql: queryToRun,
+        level: risk.level,
+        reason: risk.reason
+      })
+      return
+    }
+
+    // No risk detected, execute directly
+    handleExecute(queryToRun)
+  }
+
   async function handleExecute(customSql?: string) {
     const queryToRun = customSql || editorState.sql
     if (!queryToRun.trim()) return
+
+    // Close risky modal if open
+    setRiskyQueryModal(null)
 
     setLoading(true)
     setError(null)
@@ -1105,22 +1137,8 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     setSelectedSQL('')
   }
 
-  async function handleTakeSnapshot() {
+  function handleTakeSnapshot() {
     setShowSnapshotModal(true)
-  }
-
-  async function handleCreateSnapshot() {
-    setCreatingSnapshot(true)
-    try {
-      await createSnapshot(snapshotName.trim() || undefined)
-      setShowSnapshotModal(false)
-      setSnapshotName('')
-      alert('Snapshot created successfully!')
-    } catch (err: any) {
-      alert(`Failed to create snapshot: ${err.message}`)
-    } finally {
-      setCreatingSnapshot(false)
-    }
   }
 
   function handleExport(format: 'csv' | 'json' | 'sql' | 'markdown') {
@@ -2069,7 +2087,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
                     if (compareEnabled) {
                       handleCompareExecuteBoth()
                     } else {
-                      handleExecute()
+                      checkAndExecute()
                     }
                   }}
                   disabled={compareEnabled ? !canRunCompare || loading : loading}
@@ -2504,68 +2522,33 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
       )}
 
       {/* Take Snapshot Modal */}
-      {showSnapshotModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowSnapshotModal(false)}>
-          <div className="bg-app-sidebar border border-app-border rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Camera className="w-5 h-5" />
-              Take Snapshot
-            </h2>
+      <SnapshotCreateModal
+        isOpen={showSnapshotModal}
+        onClose={() => {
+          setShowSnapshotModal(false)
+          setSnapshotName('')
+          setSnapshotDescription('')
+        }}
+        onSuccess={() => {
+          setShowSnapshotModal(false)
+          setSnapshotName('')
+          setSnapshotDescription('')
+          toast.success('Snapshot created successfully!')
+        }}
+        defaultLabel={snapshotName}
+        defaultDescription={snapshotDescription}
+      />
 
-            <p className="text-sm text-app-text-dim mb-4">
-              Create a point-in-time snapshot of your database. You can restore to this state later.
-            </p>
-
-            <div className="mb-4">
-              <label className="block text-sm text-app-text-dim mb-2">
-                Snapshot Name (Optional)
-              </label>
-              <input
-                type="text"
-                value={snapshotName}
-                onChange={(e) => setSnapshotName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !creatingSnapshot) {
-                    handleCreateSnapshot()
-                  }
-                }}
-                placeholder="e.g., before_migration or stable_v1"
-                className="w-full px-3 py-2 bg-app-bg border border-app-border rounded text-sm focus:outline-none focus:border-app-accent"
-                autoFocus
-              />
-              <p className="text-xs text-app-text-dim mt-1">
-                Leave empty to auto-generate a timestamp-based name
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setShowSnapshotModal(false)
-                  setSnapshotName('')
-                }}
-                disabled={creatingSnapshot}
-                className="px-4 py-2 text-sm bg-app-sidebar-active hover:bg-app-sidebar-hover disabled:opacity-50 rounded transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateSnapshot}
-                disabled={creatingSnapshot}
-                className="px-4 py-2 text-sm bg-app-accent hover:bg-app-accent-hover disabled:opacity-50 text-white rounded transition-colors flex items-center gap-2"
-              >
-                {creatingSnapshot ? (
-                  <>Creating...</>
-                ) : (
-                  <>
-                    <Camera className="w-4 h-4" />
-                    Create Snapshot
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Risky Query Modal */}
+      {riskyQueryModal && (
+        <RiskyQueryModal
+          isOpen={riskyQueryModal.isOpen}
+          onClose={() => setRiskyQueryModal(null)}
+          sql={riskyQueryModal.sql}
+          riskLevel={riskyQueryModal.level}
+          riskReason={riskyQueryModal.reason}
+          onProceed={() => handleExecute(riskyQueryModal.sql)}
+        />
       )}
 
       {/* Tab Context Menu (Right-click save options) */}

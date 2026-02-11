@@ -43,6 +43,7 @@ export default async function snapshotsRoutes(fastify, options) {
           filename: snapshot.filename,
           name: snapshot.name,
           description: snapshot.description,
+          type: snapshot.type || 'manual',
           size,
           createdAt: snapshot.created_at,
           exists
@@ -57,7 +58,7 @@ export default async function snapshotsRoutes(fastify, options) {
    * Create snapshot from current branch
    */
   fastify.post('/', async (request, reply) => {
-    const { name, description } = request.body;
+    const { name, description, type = 'manual' } = request.body;
     const snapshotsPath = join(fastify.projectPath, '.studio', 'snapshots');
     const metaDb = fastify.getMetaDb();
     const currentBranch = fastify.getCurrentBranch();
@@ -65,6 +66,10 @@ export default async function snapshotsRoutes(fastify, options) {
     if (!name) {
       return reply.code(400).send({ error: 'Snapshot name is required' });
     }
+
+    // Validate type
+    const validTypes = ['manual', 'auto-before-migration', 'auto-before-promote', 'import-baseline', 'auto-risky-query'];
+    const snapshotType = validTypes.includes(type) ? type : 'manual';
 
     try {
       // Ensure snapshots directory exists
@@ -84,9 +89,9 @@ export default async function snapshotsRoutes(fastify, options) {
       const sourceDbPath = join(fastify.projectPath, branchInfo.db_file);
 
       // Create snapshot filename with timestamp
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const snapshotFilename = `${currentBranch}-${sanitizedName}-${timestamp}.db`;
+      const timestamp = Date.now();
+      const sanitizedName = name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+      const snapshotFilename = `${currentBranch}-${sanitizedName}-${timestamp}.snapshot.db`;
       const snapshotPath = join(snapshotsPath, snapshotFilename);
 
       // Checkpoint WAL before copying (ensures all data is in main DB file)
@@ -101,9 +106,9 @@ export default async function snapshotsRoutes(fastify, options) {
 
       // Record snapshot in meta DB
       const result = metaDb.prepare(`
-        INSERT INTO snapshots (branch, filename, name, size, description)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(currentBranch, snapshotFilename, name, stats.size, description || '');
+        INSERT INTO snapshots (branch, filename, name, size, description, type)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(currentBranch, snapshotFilename, name, stats.size, description || '', snapshotType);
 
       // Log event
       metaDb.prepare(`
@@ -112,7 +117,8 @@ export default async function snapshotsRoutes(fastify, options) {
       `).run(currentBranch, JSON.stringify({
         name,
         filename: snapshotFilename,
-        size: stats.size
+        size: stats.size,
+        snapshot_type: snapshotType
       }));
 
       return {
@@ -121,7 +127,8 @@ export default async function snapshotsRoutes(fastify, options) {
         filename: snapshotFilename,
         name,
         size: stats.size,
-        description: description || ''
+        description: description || '',
+        type: snapshotType
       };
     } catch (error) {
       reply.code(500).send({ error: error.message });
@@ -242,8 +249,16 @@ export default async function snapshotsRoutes(fastify, options) {
       // Delete from meta DB
       metaDb.prepare(`DELETE FROM snapshots WHERE id = ?`).run(id);
 
-      // Note: We don't delete the actual file for safety
-      // Users can manually delete snapshot files if needed
+      // Also delete the actual snapshot file
+      const snapshotFilePath = join(snapshotsPath, snapshot.filename);
+      try {
+        if (existsSync(snapshotFilePath)) {
+          unlinkSync(snapshotFilePath);
+        }
+      } catch (fileErr) {
+        // Log but don't fail if file deletion fails
+        console.warn('Failed to delete snapshot file:', fileErr.message);
+      }
 
       // Log event
       metaDb.prepare(`
@@ -295,6 +310,7 @@ export default async function snapshotsRoutes(fastify, options) {
         filename: snapshot.filename,
         name: snapshot.name,
         description: snapshot.description,
+        type: snapshot.type || 'manual',
         size,
         createdAt: snapshot.created_at,
         exists

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Database cylinder -->
+  <ellipse cx="50" cy="35" rx="20" ry="8" fill="#3b82f6" stroke="#1e40af" stroke-width="2"/>
+  <rect x="30" y="35" width="40" height="25" fill="#3b82f6"/>
+  <ellipse cx="50" cy="60" rx="20" ry="8" fill="#60a5fa" stroke="#1e40af" stroke-width="2"/>
+  <ellipse cx="50" cy="35" rx="20" ry="8" fill="#60a5fa" opacity="0.8"/>
+  
+  <!-- Kite/Diamond outline -->
+  <path d="M 50 10 L 80 50 L 50 90 L 20 50 Z" fill="none" stroke="#cbd5e1" stroke-width="3" stroke-linejoin="round"/>
+</svg>

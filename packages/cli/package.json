@@ -1,6 +1,6 @@
 {
   "name": "sql-kite",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "SQL-Kite CLI — Local-first SQLite workspace with branches, migrations and snapshots.",
   "type": "module",
   "bin": {
@@ -35,7 +35,8 @@
   },
   "files": [
     "bin/",
-    "src/"
+    "src/",
+    "README.md"
   ],
   "dependencies": {
     "better-sqlite3": "^9.2.2",

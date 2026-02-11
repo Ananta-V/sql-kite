@@ -39,7 +39,10 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       {/* Header */}
       <div className="h-12 border-b border-app-border flex items-center justify-between px-4">
         {!collapsed && (
-          <span className="font-semibold text-base">SQL Kite</span>
+          <div className="flex items-center gap-2">
+            <Database className="w-5 h-5 text-green-500" />
+            <span className="font-semibold text-base">SQL Kite</span>
+          </div>
         )}
         <button
           onClick={() => setCollapsed(!collapsed)}

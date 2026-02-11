@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useAppContext } from '@/contexts/AppContext'
 import { toast } from 'react-toastify'
 import {
@@ -62,6 +62,14 @@ export default function InnerSidebar({
   
   // Delete confirm modal state
   const [deleteModal, setDeleteModal] = useState<{ item: SnippetItem; section: 'favorites' | 'templates' | 'private' } | null>(null)
+
+  // Selected folder state (for adding folders inside)
+  const [selectedFolder, setSelectedFolder] = useState<{ id: string; section: 'favorites' | 'templates' | 'private' } | null>(null)
+  
+  // Inline rename state for newly created folders
+  const [inlineRenameId, setInlineRenameId] = useState<string | null>(null)
+  const [inlineRenameValue, setInlineRenameValue] = useState('')
+  const inlineRenameRef = useRef<HTMLInputElement>(null)
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -285,21 +293,84 @@ export default function InnerSidebar({
 
   function handleAddFolder(section: 'favorites' | 'templates' | 'private') {
     if (disabled) return
+    const newFolderId = `folder-${Date.now()}`
     const newFolder: SnippetItem = {
-      id: `folder-${Date.now()}`,
+      id: newFolderId,
       label: 'New folder',
       type: 'folder',
       children: []
     }
 
-    if (section === 'favorites') {
-      setFavorites([...favorites, newFolder])
-    } else if (section === 'templates') {
-      setTemplates([...templates, newFolder])
-    } else if (section === 'private' && onPrivateItemsChange) {
-      onPrivateItemsChange([...privateItems, newFolder])
+    // Check if a folder is selected in this section
+    const parentFolderId = selectedFolder?.section === section ? selectedFolder.id : null
+    
+    // If parent folder selected, expand it so we can see the new folder
+    if (parentFolderId) {
+      setExpandedFolders(prev => new Set([...prev, parentFolderId]))
     }
+
+    if (section === 'favorites') {
+      if (parentFolderId) {
+        setFavorites(addItemToFolder(favorites, parentFolderId, newFolder))
+      } else {
+        setFavorites([...favorites, newFolder])
+      }
+    } else if (section === 'templates') {
+      if (parentFolderId) {
+        setTemplates(addItemToFolder(templates, parentFolderId, newFolder))
+      } else {
+        setTemplates([...templates, newFolder])
+      }
+    } else if (section === 'private' && onPrivateItemsChange) {
+      if (parentFolderId) {
+        onPrivateItemsChange(addItemToFolder(privateItems, parentFolderId, newFolder))
+      } else {
+        onPrivateItemsChange([...privateItems, newFolder])
+      }
+    }
+
+    // Start inline rename for the new folder
+    setInlineRenameId(newFolderId)
+    setInlineRenameValue('New folder')
   }
+
+  // Focus inline rename input when it appears
+  useEffect(() => {
+    if (inlineRenameId && inlineRenameRef.current) {
+      inlineRenameRef.current.focus()
+      inlineRenameRef.current.select()
+    }
+  }, [inlineRenameId])
+
+  // Finish inline rename
+  const finishInlineRename = useCallback((section: 'favorites' | 'templates' | 'private') => {
+    if (!inlineRenameId) return
+    
+    const finalName = inlineRenameValue.trim() || 'New folder'
+    
+    const updateName = (items: SnippetItem[]): SnippetItem[] => {
+      return items.map(item => {
+        if (item.id === inlineRenameId) {
+          return { ...item, label: finalName }
+        }
+        if (item.children) {
+          return { ...item, children: updateName(item.children) }
+        }
+        return item
+      })
+    }
+
+    if (section === 'favorites') {
+      setFavorites(updateName(favorites))
+    } else if (section === 'templates') {
+      setTemplates(updateName(templates))
+    } else if (section === 'private' && onPrivateItemsChange) {
+      onPrivateItemsChange(updateName(privateItems))
+    }
+
+    setInlineRenameId(null)
+    setInlineRenameValue('')
+  }, [inlineRenameId, inlineRenameValue, favorites, templates, privateItems, onPrivateItemsChange])
 
   function handleCopy() {
     if (contextMenu) {
@@ -385,19 +456,31 @@ export default function InnerSidebar({
     const isExpanded = expandedFolders.has(item.id)
     const isDragOver = dragOverTarget?.type === 'folder' && dragOverTarget.id === item.id
     const isDragging = draggedItem?.item.id === item.id
+    const isSelected = isFolder && selectedFolder?.id === item.id && selectedFolder?.section === section
+    const isInlineRename = inlineRenameId === item.id
 
-    function handleClick() {
+    function handleClick(e: React.MouseEvent) {
+      e.stopPropagation() // Prevent deselecting when clicking on items
       if (disabled) return
       if (isFolder) {
+        // If clicking on a folder, select it (toggle selection if already selected)
+        if (isSelected) {
+          setSelectedFolder(null)
+        } else {
+          setSelectedFolder({ id: item.id, section })
+        }
+        // Also toggle expand on double-click or chevron click
         toggleFolder(item.id)
       } else if (item.sql && onOpenFile) {
+        // Deselect any folder when clicking a file
+        setSelectedFolder(null)
         // Open file in a new tab
         onOpenFile(item, section)
       }
     }
 
     return (
-      <div key={item.id}>
+      <div key={item.id} onClick={(e) => e.stopPropagation()}>
         <div
           draggable={!disabled}
           onDragStart={(e) => handleDragStart(e, item, section)}
@@ -428,7 +511,9 @@ export default function InnerSidebar({
             relative flex items-center justify-between px-2 py-1.5 text-sm rounded
             transition-colors cursor-pointer group
             ${isDragging ? 'opacity-50' : ''}
-            ${isDragOver && isFolder ? 'bg-app-accent/20 ring-1 ring-app-accent' : 'hover:bg-app-sidebar-hover'}
+            ${isSelected ? 'bg-app-accent/30 ring-1 ring-app-accent' : ''}
+            ${isDragOver && isFolder ? 'bg-app-accent/20 ring-1 ring-app-accent' : ''}
+            ${!isSelected && !isDragOver ? 'hover:bg-app-sidebar-hover' : ''}
           `}
           title={disabled ? disableTitle : undefined}
           style={{ paddingLeft: `${8 + depth * 12}px` }}
@@ -463,7 +548,30 @@ export default function InnerSidebar({
                 <FileCode className="w-4 h-4 flex-shrink-0 text-blue-400/70" />
               </>
             )}
-            <span className="truncate text-app-text">{item.label}</span>
+            {isInlineRename ? (
+              <input
+                ref={inlineRenameRef}
+                type="text"
+                value={inlineRenameValue}
+                onChange={(e) => setInlineRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    finishInlineRename(section)
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setInlineRenameId(null)
+                    setInlineRenameValue('')
+                  }
+                }}
+                onBlur={() => finishInlineRename(section)}
+                onClick={(e) => e.stopPropagation()}
+                className="flex-1 min-w-0 px-1 py-0 text-sm bg-app-bg border border-app-accent rounded focus:outline-none text-app-text"
+              />
+            ) : (
+              <span className="truncate text-app-text">{item.label}</span>
+            )}
           </div>
 
           <button
@@ -536,7 +644,10 @@ export default function InnerSidebar({
     <div
       className={`bg-app-sidebar border-r border-app-border overflow-y-auto flex-shrink-0 ${disabled ? 'opacity-70' : ''}`}
       style={{ width }}
-      onClick={() => setContextMenu(null)}
+      onClick={() => {
+        setContextMenu(null)
+        setSelectedFolder(null)
+      }}
     >
       <div className="p-2">
         {/* Favorites Section */}
@@ -585,9 +696,9 @@ export default function InnerSidebar({
             {!favoritesCollapsed && (
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => handleAddFolder('favorites')}
+                  onClick={(e) => { e.stopPropagation(); handleAddFolder('favorites') }}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title={disabled ? disableTitle : 'Add folder'}
+                  title={disabled ? disableTitle : (selectedFolder?.section === 'favorites' ? 'Add folder inside selected' : 'Add folder')}
                   disabled={disabled}
                 >
                   <FolderPlus className="w-3.5 h-3.5 text-app-text-dim" />
@@ -654,9 +765,9 @@ export default function InnerSidebar({
             {!templatesCollapsed && (
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => handleAddFolder('templates')}
+                  onClick={(e) => { e.stopPropagation(); handleAddFolder('templates') }}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title={disabled ? disableTitle : 'Add folder'}
+                  title={disabled ? disableTitle : (selectedFolder?.section === 'templates' ? 'Add folder inside selected' : 'Add folder')}
                   disabled={disabled}
                 >
                   <FolderPlus className="w-3.5 h-3.5 text-app-text-dim" />
@@ -724,9 +835,9 @@ export default function InnerSidebar({
             {!privateCollapsed && (
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => handleAddFolder('private')}
+                  onClick={(e) => { e.stopPropagation(); handleAddFolder('private') }}
                   className="p-1 hover:bg-app-sidebar-hover rounded transition-colors"
-                  title={disabled ? disableTitle : 'Add folder'}
+                  title={disabled ? disableTitle : (selectedFolder?.section === 'private' ? 'Add folder inside selected' : 'Add folder')}
                   disabled={disabled}
                 >
                   <FolderPlus className="w-3.5 h-3.5 text-app-text-dim" />

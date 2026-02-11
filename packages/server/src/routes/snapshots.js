@@ -7,7 +7,7 @@ export default async function snapshotsRoutes(fastify, options) {
    * List snapshots for current branch
    */
   fastify.get('/', async (request, reply) => {
-    const snapshotsPath = join(fastify.projectPath, 'snapshots');
+    const snapshotsPath = join(fastify.projectPath, '.studio', 'snapshots');
     const metaDb = fastify.getMetaDb();
     const currentBranch = fastify.getCurrentBranch();
 
@@ -58,7 +58,7 @@ export default async function snapshotsRoutes(fastify, options) {
    */
   fastify.post('/', async (request, reply) => {
     const { name, description } = request.body;
-    const snapshotsPath = join(fastify.projectPath, 'snapshots');
+    const snapshotsPath = join(fastify.projectPath, '.studio', 'snapshots');
     const metaDb = fastify.getMetaDb();
     const currentBranch = fastify.getCurrentBranch();
 
@@ -133,7 +133,7 @@ export default async function snapshotsRoutes(fastify, options) {
    */
   fastify.post('/restore/:id', async (request, reply) => {
     const { id } = request.params;
-    const snapshotsPath = join(fastify.projectPath, 'snapshots');
+    const snapshotsPath = join(fastify.projectPath, '.studio', 'snapshots');
     const metaDb = fastify.getMetaDb();
     const currentBranch = fastify.getCurrentBranch();
 
@@ -219,7 +219,7 @@ export default async function snapshotsRoutes(fastify, options) {
    */
   fastify.delete('/:id', async (request, reply) => {
     const { id } = request.params;
-    const snapshotsPath = join(fastify.projectPath, 'snapshots');
+    const snapshotsPath = join(fastify.projectPath, '.studio', 'snapshots');
     const metaDb = fastify.getMetaDb();
     const currentBranch = fastify.getCurrentBranch();
 
@@ -265,7 +265,7 @@ export default async function snapshotsRoutes(fastify, options) {
    */
   fastify.get('/:id', async (request, reply) => {
     const { id } = request.params;
-    const snapshotsPath = join(fastify.projectPath, 'snapshots');
+    const snapshotsPath = join(fastify.projectPath, '.studio', 'snapshots');
     const metaDb = fastify.getMetaDb();
 
     try {

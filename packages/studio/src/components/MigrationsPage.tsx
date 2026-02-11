@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Play, FileText, Check, X, Loader, ChevronRight, ChevronDown, AlertTriangle, Trash2, Download } from 'lucide-react'
 import { getMigrations, applyMigration, applyAllMigrations, getProjectInfo, getMigrationStatus, deleteMigration, exportAppliedMigrations, exportSchema } from '@/lib/api'
+import { useAppContext } from '@/contexts/AppContext'
 
 interface Migration {
   filename: string
@@ -20,6 +21,7 @@ interface Migration {
 }
 
 export default function MigrationsPage() {
+  const { branchVersion } = useAppContext()
   const [migrations, setMigrations] = useState<Migration[]>([])
   const [loading, setLoading] = useState(true)
   const [applying, setApplying] = useState<string | null>(null)
@@ -33,7 +35,7 @@ export default function MigrationsPage() {
 
   useEffect(() => {
     loadMigrations()
-  }, [])
+  }, [branchVersion])
 
   // Close export menu when clicking outside
   useEffect(() => {

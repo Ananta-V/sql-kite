@@ -5,6 +5,7 @@ import { GitBranch, Plus, Trash2, Lock, Loader, ArrowRight } from 'lucide-react'
 import { getBranches, deleteBranch, switchBranch } from '@/lib/api'
 import { format } from 'date-fns'
 import BranchPromoteModal from './BranchPromoteModal'
+import { useAppContext } from '@/contexts/AppContext'
 
 interface Branch {
   name: string
@@ -22,6 +23,7 @@ interface BranchesPageProps {
 }
 
 export default function BranchesPage({ currentBranch, onBranchChange, onCreateClick }: BranchesPageProps) {
+  const { branchVersion } = useAppContext()
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -29,7 +31,7 @@ export default function BranchesPage({ currentBranch, onBranchChange, onCreateCl
 
   useEffect(() => {
     loadBranches()
-  }, [])
+  }, [branchVersion])
 
   async function loadBranches() {
     try {

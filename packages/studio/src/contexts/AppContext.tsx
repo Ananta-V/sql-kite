@@ -26,16 +26,23 @@ interface AppContextType {
   // Project Info
   projectInfo: any
   setProjectInfo: (info: any) => void
+
+  // Branch change tracking - increment to trigger refetch in listening components
+  branchVersion: number
+  incrementBranchVersion: () => void
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [projectInfo, setProjectInfo] = useState<any>(null)
+  const [branchVersion, setBranchVersion] = useState(0)
   const [editorState, setEditorStateInternal] = useState<EditorState>({
     sql: '-- Write your SQL query here\n\n-- Press Ctrl+Space for autocomplete\n',
     activeTab: 'result'
   })
+
+  const incrementBranchVersion = () => setBranchVersion(v => v + 1)
 
   // Load SQL from localStorage on mount
   useEffect(() => {
@@ -95,7 +102,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateActiveTab,
         addFavorite,
         projectInfo,
-        setProjectInfo
+        setProjectInfo,
+        branchVersion,
+        incrementBranchVersion
       }}
     >
       {children}

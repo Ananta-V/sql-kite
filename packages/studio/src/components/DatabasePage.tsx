@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Table2, ChevronRight, ChevronDown, Eye, Zap, Code, Copy, CheckCircle, Database as DatabaseIcon, Network } from 'lucide-react'
 import { getTables, getTableInfo, executeQuery } from '@/lib/api'
 import ERDiagramPage from './ERDiagramPage'
+import { useAppContext } from '@/contexts/AppContext'
 
 interface DBObject {
   name: string
@@ -26,6 +27,7 @@ interface Constraint {
 }
 
 export default function DatabasePage() {
+  const { branchVersion } = useAppContext()
   const [mainView, setMainView] = useState<'tables' | 'er'>('tables')
   const [tables, setTables] = useState<DBObject[]>([])
   const [views, setViews] = useState<DBObject[]>([])
@@ -44,7 +46,7 @@ export default function DatabasePage() {
 
   useEffect(() => {
     loadDatabaseObjects()
-  }, [])
+  }, [branchVersion])
 
   useEffect(() => {
     if (selectedObject) {

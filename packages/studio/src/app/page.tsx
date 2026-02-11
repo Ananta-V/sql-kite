@@ -21,7 +21,7 @@ function AppContent() {
   const [showBranchModal, setShowBranchModal] = useState(false)
   const [showAIPanel, setShowAIPanel] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
-  const { projectInfo, setProjectInfo } = useAppContext()
+  const { projectInfo, setProjectInfo, incrementBranchVersion } = useAppContext()
 
   useEffect(() => {
     loadProjectInfo()
@@ -38,6 +38,7 @@ function AppContent() {
 
   function handleBranchChange() {
     loadProjectInfo()
+    incrementBranchVersion()
   }
 
   function handleCreateBranch() {

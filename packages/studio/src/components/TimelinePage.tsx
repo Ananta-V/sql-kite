@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Clock, Code, Database, Camera, AlertCircle, GitBranch, Loader, ChevronDown, ChevronRight } from 'lucide-react'
 import { getTimeline, getProjectInfo } from '@/lib/api'
 import { formatDistanceToNow, isToday, isYesterday, format } from 'date-fns'
+import { useAppContext } from '@/contexts/AppContext'
 
 type FilterType = 'all' | 'migrations' | 'sql' | 'snapshots' | 'branches'
 
@@ -16,6 +17,7 @@ interface TimelineEvent {
 }
 
 export default function TimelinePage() {
+  const { branchVersion } = useAppContext()
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [currentBranch, setCurrentBranch] = useState('main')
@@ -25,11 +27,11 @@ export default function TimelinePage() {
 
   useEffect(() => {
     loadProjectInfo()
-  }, [])
+  }, [branchVersion])
 
   useEffect(() => {
     loadTimeline()
-  }, [filter])
+  }, [filter, branchVersion])
 
   async function loadProjectInfo() {
     try {

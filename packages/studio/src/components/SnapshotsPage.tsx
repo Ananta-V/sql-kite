@@ -4,15 +4,17 @@ import { useEffect, useState } from 'react'
 import { Camera, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { getSnapshots, createSnapshot, restoreSnapshot } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
+import { useAppContext } from '@/contexts/AppContext'
 
 export default function SnapshotsPage() {
+  const { branchVersion } = useAppContext()
   const [snapshots, setSnapshots] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     loadSnapshots()
-  }, [])
+  }, [branchVersion])
 
   async function loadSnapshots() {
     try {

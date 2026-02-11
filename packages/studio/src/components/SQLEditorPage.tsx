@@ -74,7 +74,7 @@ interface SQLEditorPageProps {
 }
 
 export default function SQLEditorPage({ compareMode = false, onCompareModeChange }: SQLEditorPageProps) {
-  const { editorState, updateSQL, updateActiveTab, addFavorite, projectInfo } = useAppContext()
+  const { editorState, updateSQL, updateActiveTab, addFavorite, projectInfo, branchVersion } = useAppContext()
   const [result, setResult] = useState<ExecutionResult | null>(null)
   const [error, setError] = useState<ErrorDetails | null>(null)
   const [errorHistory, setErrorHistory] = useState<Array<{ sql: string; error: ErrorDetails; timestamp: number }>>([])
@@ -386,7 +386,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   // Load table schema for autocomplete
   useEffect(() => {
     loadSchemaForAutocomplete()
-  }, [])
+  }, [branchVersion])
 
   useEffect(() => {
     setCompareEnabled(compareMode)
@@ -1308,20 +1308,11 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
         {/* Editor */}
         <div className="flex flex-col border-b border-app-border min-h-0">
           {/* SQL Editor Bar */}
-          <div className="px-4 py-2 bg-app-sidebar/30 border-b border-app-border flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="text-xs uppercase text-app-text-dim">SQL Editor</span>
-              <button
-                onClick={handleToggleCompareMode}
-                className={`px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-2 ${compareEnabled ? 'bg-app-accent/20 text-app-accent' : 'bg-app-sidebar-active hover:bg-app-sidebar-hover text-app-text'}`}
-              >
-                <ArrowLeftRight className="w-3.5 h-3.5" />
-                Compare {compareEnabled ? 'On' : 'Off'}
-              </button>
-            </div>
+          <div className="px-4 py-2 bg-app-sidebar/30 border-b border-app-border flex flex-wrap items-center gap-3">
+            <span className="text-xs uppercase text-app-text-dim">SQL Editor</span>
 
             {compareEnabled && (
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex-1 flex flex-wrap items-center justify-center gap-3">
                 <div className="flex items-center gap-2 text-xs text-app-text-dim">
                   <GitBranch className="w-3.5 h-3.5" />
                   <span>Branch A</span>
@@ -1378,6 +1369,18 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
                 </div>
               </div>
             )}
+
+            {!compareEnabled && <div className="flex-1" />}
+
+            <div className="ml-6">
+              <button
+                onClick={handleToggleCompareMode}
+                className={`px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-2 ${compareEnabled ? 'bg-app-accent/20 text-app-accent' : 'bg-app-sidebar-active hover:bg-app-sidebar-hover text-app-text'}`}
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                Compare {compareEnabled ? 'On' : 'Off'}
+              </button>
+            </div>
           </div>
 
           {!compareEnabled ? (

@@ -10,11 +10,15 @@
 
 <p align="center">
   <strong>Version-controlled SQLite for local development.</strong>
-</p>init
+</p>
 
 <p align="center">
   Branch your database. Inspect every change. Recover instantly.<br/>
   <b>No cloud • No accounts • No telemetry</b>
+</p>
+
+<p align="center">
+  <code>npm install -g sql-kite</code>
 </p>
 
 ---
@@ -160,14 +164,65 @@ SQL Kite runs **entirely on your machine**.
 
 ### Requirements
 
-* Node.js 18+
-* npm
+* **Node.js 18** (LTS recommended)
+* **npm**
 
-### Install
+> **Important:** SQL Kite uses [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3), a native C++ module. Node.js 20+ may have compatibility issues with the current version. **Node.js 18 LTS is recommended** for the best experience.
+
+**Windows users:** If installation fails, you may need native build tools:
+1. Re-run the Node.js installer and check **"Automatically install the necessary tools"**
+2. Or run `C:\Program Files\nodejs\install_tools.bat` to install Python and Visual Studio Build Tools
+
+> **No special characters or spaces in your project path** — `node-gyp` may not handle them correctly.
+
+### Option 1: Global Installation (Recommended)
+
+Install globally to use `sql-kite` commands from anywhere:
 
 ```bash
 npm install -g sql-kite
 ```
+
+**Usage after global installation:**
+
+```bash
+sql-kite new my-db
+sql-kite start my-db
+sql-kite list
+```
+
+### Option 2: Local Installation
+
+Install locally in your project:
+
+```bash
+npm install sql-kite
+```
+
+**Usage after local installation:**
+
+Add this script to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "sql-kite": "sql-kite"
+  }
+}
+```
+
+Then run:
+
+```bash
+npm run sql-kite new my-db
+npm run sql-kite start my-db
+npm run sql-kite list
+npm run sql-kite import ./database.db
+```
+
+---
+
+> **Recommendation:** Use global installation for CLI tools to avoid typing `npm run` every time.
 
 ---
 
@@ -178,13 +233,13 @@ npm install -g sql-kite
 ### 1) Create a project
 
 ```bash
-npm run sql-kite new my-db
+sql-kite new my-db
 ```
 
 ### 2) Start the studio
 
 ```bash
-npm run sql-kite start my-db
+sql-kite start my-db
 ```
 
 Your browser opens automatically.
@@ -194,7 +249,7 @@ Your browser opens automatically.
 ### Import an existing database
 
 ```bash
-npm run sql-kite import ./database.db
+sql-kite import ./database.db
 ```
 
 > SQL Kite will safely adopt the file into a managed workspace.
@@ -205,15 +260,15 @@ npm run sql-kite import ./database.db
 
 | Command                            | Description     |
 | ---------------------------------- | --------------- |
-| `npm run sql-kite new <name>`      | Create project  |
-| `npm run sql-kite import <path>`   | Import database |
-| `npm run sql-kite start <name>`    | Launch Studio   |
-| `npm run sql-kite stop <name>`     | Stop server     |
-| `npm run sql-kite open <name>`     | Open UI         |
-| `npm run sql-kite list`            | List projects   |
-| `npm run sql-kite delete <name>`   | Remove project  |
-| `npm run sql-kite ports`           | Show port usage |
-| `npm run sql-kite init`            | Scaffold app database layer |
+| `sql-kite new <name>`      | Create project  |
+| `sql-kite import <path>`   | Import database |
+| `sql-kite start <name>`    | Launch Studio   |
+| `sql-kite stop <name>`     | Stop server     |
+| `sql-kite open <name>`     | Open UI         |
+| `sql-kite list`            | List projects   |
+| `sql-kite delete <name>`   | Remove project  |
+| `sql-kite ports`           | Show port usage |
+| `sql-kite init`            | Scaffold app database layer |
 
 ---
 
@@ -227,7 +282,7 @@ SQL Kite provides a database integration layer with automatic dev/production swi
 
 ```bash
 cd your-app-project
-npm run sql-kite init
+sql-kite init
 ```
 
 This creates:
@@ -238,6 +293,12 @@ lib/database/
   └── engine.local.js
 ```
 
+| File | Purpose |
+|---|---|
+| `index.js` | Auto-switches between dev and production engines |
+| `engine.dev.js` | HTTP client that queries the SQL-Kite server |
+| `engine.local.js` | Local SQLite via expo-sqlite for production |
+
 **2) Use in your app:**
 
 ```javascript
@@ -245,6 +306,29 @@ import { runQuery } from '@/lib/database';
 
 const users = await runQuery("SELECT * FROM users WHERE active = ?", [1]);
 ```
+
+### How Dev/Prod Switching Works
+
+The switching is **fully automatic** — the user does not need to manually toggle anything.
+
+```javascript
+const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV === 'development';
+```
+
+**Detection order:**
+1. **Expo's `__DEV__` global** — automatically `true` in dev builds, `false` in production
+2. **Fallback:** `process.env.NODE_ENV === 'development'`
+
+| Environment | Engine Used | How it works |
+|---|---|---|
+| Development (`isDev = true`) | `engine.dev.js` | Queries go to SQL-Kite server via HTTP |
+| Production (`isDev = false`) | `engine.local.js` | Queries run locally via expo-sqlite |
+
+### Port Configuration (Dev Mode)
+
+The dev engine connects to the SQL-Kite server using:
+- `SQL_KITE_PORT` environment variable (if set)
+- Default port `3000` (editable in the generated `engine.dev.js`)
 
 ### Two Workflow Modes
 
@@ -385,14 +469,14 @@ npm run build:studio
 ### Port in use
 
 ```bash
-npm run sql-kite ports
+sql-kite ports
 ```
 
 ### Restart project
 
 ```bash
-npm run sql-kite stop my-db
-npm run sql-kite start my-db
+sql-kite stop my-db
+sql-kite start my-db
 ```
 
 ### Import fails

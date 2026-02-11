@@ -1,19 +1,27 @@
 'use client'
 
-import { Home, Code, Database, Camera, Clock, Settings, Menu, GitBranch } from 'lucide-react'
+import { Home, Code, Database, Camera, Clock, Settings, Menu, GitBranch, Package } from 'lucide-react'
 import { useState } from 'react'
 
-type Page = 'home' | 'sql' | 'database' | 'branches' | 'migrations' | 'snapshots' | 'timeline' | 'settings'
+type Page = 'home' | 'sql' | 'database' | 'branches' | 'migrations' | 'snapshots' | 'timeline' | 'export' | 'settings'
 
 interface SidebarProps {
   currentPage: Page
   onNavigate: (page: Page) => void
 }
 
+type MenuItem = {
+  id: Page
+  icon: typeof Home
+  label: string
+} | {
+  divider: true
+}
+
 export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
 
-  const menuItems = [
+  const menuItems: MenuItem[] = [
     { id: 'home' as Page, icon: Home, label: 'Dashboard' },
     { id: 'sql' as Page, icon: Code, label: 'SQL Editor' },
     { id: 'database' as Page, icon: Database, label: 'Database' },
@@ -21,6 +29,8 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     { id: 'migrations' as Page, icon: Clock, label: 'Migrations' },
     { id: 'snapshots' as Page, icon: Camera, label: 'Snapshots' },
     { id: 'timeline' as Page, icon: Clock, label: 'Timeline' },
+    { divider: true },
+    { id: 'export' as Page, icon: Package, label: 'Export' },
     { id: 'settings' as Page, icon: Settings, label: 'Settings' },
   ]
 
@@ -42,7 +52,13 @@ export default function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 p-2">
         <div className="space-y-0.5">
-          {menuItems.map((item) => {
+          {menuItems.map((item, index) => {
+            if ('divider' in item) {
+              return (
+                <div key={`divider-${index}`} className="my-2 border-t border-app-border" />
+              )
+            }
+
             const Icon = item.icon
             const isActive = currentPage === item.id
 

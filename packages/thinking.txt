@@ -1,0 +1,40 @@
+Great question! Let me walk you through the complete developer workflow:
+
+1. Installation
+This installs the sql-kite CLI globally.
+
+2. Database Location
+All SQL Kite data lives in:
+
+On Windows: C:\Users\<you>\.sql-kite\runtime\<project>\
+
+3. Development Workflow with Expo
+Step 1: Create the database project
+This starts a local API server (e.g., http://localhost:5480).
+
+Step 2: Design your schema in Studio
+Open the browser UI, create tables, run queries, test migrations.
+
+Step 3: Expo app talks to SQL Kite via HTTP
+During development, your Expo app connects to the SQL Kite API:
+
+4. Architecture During Development
+Key endpoints your Expo app can use:
+
+POST /api/query — Execute SQL and get results
+GET /api/tables — List all tables
+GET /api/tables/:name — Get table schema
+5. For Production (Expo)
+SQL Kite is a development tool. For production, you have options:
+
+Option A: Export schema + seed data
+Then use expo-sqlite in your app:
+
+Option B: Bundle the .sqlite file
+Copy db.sqlite from ~/.sql-kite/runtime/my-app/ into your Expo app's assets, then load it with expo-sqlite.
+
+Summary
+Phase	Where DB Lives	How App Talks
+Development	~/.sql-kite/runtime/<project>/db.sqlite	HTTP to localhost:5480
+Production	Bundled in app or created on device	expo-sqlite native
+SQL Kite gives you a safe sandbox to design, test, and iterate on your database during development — then you export/bundle for production.

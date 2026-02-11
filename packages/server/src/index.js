@@ -77,7 +77,8 @@ await fastify.register(cors, {
 if (!IMPORT_MODE) {
   fastify.decorate('projectName', PROJECT_NAME);
   fastify.decorate('projectPath', PROJECT_PATH);
-  fastify.decorate('getUserDb', () => getUserDb(PROJECT_PATH));
+  // API always queries 'main' branch only - branches are for Studio development only
+  fastify.decorate('getUserDb', () => getUserDb(PROJECT_PATH, 'main'));
   fastify.decorate('getMetaDb', () => getMetaDb(PROJECT_PATH));
   fastify.decorate('getCurrentBranch', () => getCurrentBranch(PROJECT_PATH));
 }

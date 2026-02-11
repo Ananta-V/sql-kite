@@ -30,7 +30,6 @@ export default async function exportRoutes(fastify, options) {
       let totalRows = 0;
       let lastModified = null;
       let pendingMigrations = 0;
-      let branchesAheadOfMain = 0;
 
       if (mainExists) {
         // Check if db_file includes 'branches/' prefix or is in root
@@ -93,16 +92,6 @@ export default async function exportRoutes(fastify, options) {
           // Migrations table might not exist
           pendingMigrations = 0;
         }
-
-        // Count branches that have changes not in main
-        try {
-          const branchCount = metaDb.prepare(`
-            SELECT COUNT(*) as cnt FROM branches WHERE name != 'main'
-          `).get();
-          branchesAheadOfMain = branchCount?.cnt || 0;
-        } catch (e) {
-          branchesAheadOfMain = 0;
-        }
       }
 
       return {
@@ -111,8 +100,7 @@ export default async function exportRoutes(fastify, options) {
         tableCount,
         totalRows,
         lastModified,
-        pendingMigrations,
-        branchesAheadOfMain
+        pendingMigrations
       };
     } catch (error) {
       console.error('Export status error:', error);

@@ -8,7 +8,6 @@ interface ExportStatus {
   pendingMigrations: number
   databaseHealthy: boolean
   lastModified: string | null
-  branchesAheadOfMain: number
   tableCount: number
   totalRows: number
 }
@@ -123,6 +122,9 @@ export default function ExportPage() {
                   (Production source — always stable)
                 </span>
               </div>
+              <div className="mt-3 text-xs text-app-text-dim">
+                ℹ️ Only the <span className="font-mono text-emerald-400">main</span> branch can be exported. To export another branch, promote it to main first.
+              </div>
             </div>
 
             {/* Status Checks */}
@@ -170,14 +172,6 @@ export default function ExportPage() {
                   </div>
                 </div>
               </div>
-              {status.branchesAheadOfMain > 0 && (
-                <div className="mt-4 pt-4 border-t border-app-border">
-                  <div className="flex items-center gap-2 text-sm text-amber-400">
-                    <AlertCircle className="w-4 h-4" />
-                    <span>{status.branchesAheadOfMain} branch(es) have changes not in main</span>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Export Section */}

@@ -203,16 +203,16 @@ sql-kite import ./database.db
 
 ## CLI Commands
 
-| Command                    | Description     |
-| -------------------------- | --------------- |
-| `sql-kite new <name>`      | Create project  |
-| `sql-kite import <path>`   | Import database |
-| `sql-kite start <name>`    | Launch Studio   |
-| `sql-kite stop <name>`     | Stop server     |
-| `sql-kite open <name>`     | Open UI         |
-| `sql-kite list`            | List projects   |
-| `sql-kite delete <name>`   | Remove project  |
-| `sql-kite ports`           | Show port usage |
+| Command                            | Description     |
+| ---------------------------------- | --------------- |
+| `npm run sql-kite new <name>`      | Create project  |
+| `npm run sql-kite import <path>`   | Import database |
+| `npm run sql-kite start <name>`    | Launch Studio   |
+| `npm run sql-kite stop <name>`     | Stop server     |
+| `npm run sql-kite open <name>`     | Open UI         |
+| `npm run sql-kite list`            | List projects   |
+| `npm run sql-kite delete <name>`   | Remove project  |
+| `npm run sql-kite ports`           | Show port usage |
 
 ---
 

@@ -8,8 +8,7 @@
   },
   "scripts": {
     "dev": "node bin/sql-kite.js",
-    "start": "node bin/sql-kite.js",
-    "prepublishOnly": "npm run build || echo 'No build step required'"
+    "start": "node bin/sql-kite.js"
   },
   "author": "D Krishna",
   "license": "MIT",

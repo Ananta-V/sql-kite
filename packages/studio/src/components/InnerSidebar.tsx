@@ -87,7 +87,7 @@ export default function InnerSidebar({
   }, [])
 
   function loadFavorites() {
-    const savedFavorites = localStorage.getItem('localdb-favorites')
+    const savedFavorites = localStorage.getItem('sql-kite-favorites')
     if (savedFavorites) {
       try {
         setFavorites(JSON.parse(savedFavorites))
@@ -98,7 +98,7 @@ export default function InnerSidebar({
   }
 
   function loadTemplates() {
-    const savedTemplates = localStorage.getItem('localdb-templates')
+    const savedTemplates = localStorage.getItem('sql-kite-templates')
     if (savedTemplates) {
       try {
         setTemplates(JSON.parse(savedTemplates))
@@ -110,11 +110,11 @@ export default function InnerSidebar({
 
   // Save to localStorage whenever they change
   useEffect(() => {
-    localStorage.setItem('localdb-favorites', JSON.stringify(favorites))
+    localStorage.setItem('sql-kite-favorites', JSON.stringify(favorites))
   }, [favorites])
 
   useEffect(() => {
-    localStorage.setItem('localdb-templates', JSON.stringify(templates))
+    localStorage.setItem('sql-kite-templates', JSON.stringify(templates))
   }, [templates])
 
   function toggleFolder(folderId: string) {

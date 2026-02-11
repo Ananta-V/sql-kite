@@ -3,7 +3,7 @@
 /**
  * Port Management System Test Suite
  *
- * Tests the LocalDB port management system to ensure:
+ * Tests the SQL Kite port management system to ensure:
  * - Concurrent project starts get unique ports
  * - Port registry tracks allocations correctly
  * - Auto-cleanup removes stale allocations
@@ -292,7 +292,7 @@ async function testRegistryIntegrity() {
 async function runTests() {
   console.log(`${bold}${cyan}`);
   console.log('╔═══════════════════════════════════════════════════╗');
-  console.log('║     LocalDB Port Management Test Suite           ║');
+  console.log('║     SQL Kite Port Management Test Suite          ║');
   console.log('╚═══════════════════════════════════════════════════╝');
   console.log(reset);
 

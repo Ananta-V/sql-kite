@@ -63,7 +63,7 @@ export default function HomePage({ projectInfo }: any) {
     <div className="p-8">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold mb-2">
-          Welcome to {projectInfo?.name || 'LocalDB Studio'}
+          Welcome to {projectInfo?.name || 'SQL Kite Studio'}
         </h1>
         <p className="text-studio-text-dim mb-8">
           Local SQLite database management platform

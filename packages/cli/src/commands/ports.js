@@ -11,7 +11,7 @@ export async function portsCommand(options = {}) {
 
   const status = getPortStatus();
 
-  console.log(chalk.bold('\n📊 LocalDB Port Registry Status\n'));
+  console.log(chalk.bold('\n📊 SQL Kite Port Registry Status\n'));
 
   if (status.total_allocations === 0) {
     console.log(chalk.dim('  No ports currently allocated'));

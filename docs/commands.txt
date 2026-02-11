@@ -1,4 +1,93 @@
- importing  ===== npm localdb import C:\Users\SMEC\Downloads\Car_Database.db
- stop ===  npm run localdb stop car-database
- start === npm run localdb start car-database
- see ports == npm run ports
+================================================================================
+                          SQL KITE - COMMAND REFERENCE
+================================================================================
+
+SQL Kite is a local SQLite database management platform with a Studio UI.
+
+--------------------------------------------------------------------------------
+INSTALLATION & SETUP
+--------------------------------------------------------------------------------
+
+1. Install dependencies:
+   npm install
+
+2. Build the Studio UI:
+   npm run build:studio
+
+3. Link CLI globally (optional):
+   npm run link:cli
+
+--------------------------------------------------------------------------------
+CLI COMMANDS
+--------------------------------------------------------------------------------
+
+CREATE NEW PROJECT:
+   npm run sql-kite new <project-name>
+   Example: npm run sql-kite new my-database
+
+IMPORT EXISTING DATABASE:
+   npm run sql-kite import <path-to-sqlite-file>
+   Example: npm run sql-kite import C:\Users\SMEC\Downloads\Car_Database.db
+
+START PROJECT (opens Studio UI):
+   npm run sql-kite start <project-name>
+   Example: npm run sql-kite start car-database
+
+STOP PROJECT:
+   npm run sql-kite stop <project-name>
+   Example: npm run sql-kite stop car-database
+
+OPEN STUDIO (if already running):
+   npm run sql-kite open <project-name>
+   Example: npm run sql-kite open car-database
+
+LIST ALL PROJECTS:
+   npm run sql-kite list
+
+DELETE PROJECT:
+   npm run sql-kite delete <project-name>
+   Example: npm run sql-kite delete car-database
+
+VIEW PORT ALLOCATIONS:
+   npm run ports
+   -- OR --
+   npm run sql-kite ports
+
+CLEANUP STALE PORTS:
+   npm run sql-kite ports --cleanup
+
+--------------------------------------------------------------------------------
+DEVELOPMENT COMMANDS
+--------------------------------------------------------------------------------
+
+Run CLI in development mode:
+   npm run dev:cli
+
+Run Server in development mode:
+   npm run dev:server
+
+Run Studio in development mode:
+   npm run dev:studio
+
+Build Studio for production:
+   npm run build:studio
+
+--------------------------------------------------------------------------------
+DATA STORAGE LOCATIONS
+--------------------------------------------------------------------------------
+
+Projects are stored in: ~/.sql-kite/runtime/<project-name>/
+Studio data:            ~/.sql-kite/studio/
+Logs:                   ~/.sql-kite/logs/
+
+--------------------------------------------------------------------------------
+PROJECT STRUCTURE
+--------------------------------------------------------------------------------
+
+Each project contains:
+- db.sqlite           - Main database file
+- migrations/         - SQL migration files
+- snapshots/          - Database snapshots
+- .studio/            - Studio metadata (meta.db, server.json)
+
+================================================================================

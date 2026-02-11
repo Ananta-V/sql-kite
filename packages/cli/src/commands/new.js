@@ -3,7 +3,7 @@ import { join } from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { 
-  ensureLocalDbDirs, 
+  ensureSqlKiteDirs, 
   getProjectPath, 
   getProjectDbPath, 
   getProjectMetaPath,
@@ -12,7 +12,7 @@ import {
 import { initUserDb, initMetaDb } from '../utils/db-init.js';
 
 export async function newCommand(name) {
-  ensureLocalDbDirs();
+  ensureSqlKiteDirs();
   
   if (projectExists(name)) {
     console.log(chalk.red(`✗ Project "${name}" already exists`));
@@ -52,7 +52,7 @@ export async function newCommand(name) {
     
     spinner.succeed(chalk.green(`✓ Project "${name}" created successfully`));
     console.log(chalk.dim(`   Location: ${projectPath}`));
-    console.log(chalk.dim(`\n   Run: ${chalk.cyan(`localdb start ${name}`)}`));
+    console.log(chalk.dim(`\n   Run: ${chalk.cyan(`sql-kite start ${name}`)}`));
   } catch (error) {
     spinner.fail(chalk.red('✗ Failed to create project'));
     console.error(error);

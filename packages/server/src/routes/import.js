@@ -10,8 +10,8 @@ import { migrateMetaDb } from '../../../cli/src/utils/meta-migration.js'
 export default async function importRoutes(fastify, options) {
   const __dirname = dirname(fileURLToPath(import.meta.url))
   const homeDir = process.env.HOME || process.env.USERPROFILE
-  const projectsRoot = join(homeDir, '.localdb', 'runtime')
-  const sessionFile = join(homeDir, '.localdb', 'import-pending.json')
+  const projectsRoot = join(homeDir, '.sql-kite', 'runtime')
+  const sessionFile = join(homeDir, '.sql-kite', 'import-pending.json')
 
   // Get pending import session
   fastify.get('/pending', async (request, reply) => {

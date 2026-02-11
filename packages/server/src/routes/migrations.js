@@ -38,7 +38,7 @@ export default async function migrationsRoutes(fastify, options) {
           created_at: stats.birthtime.toISOString(),
           applied_at: appliedAt || null,
           checksum,
-          author: 'LocalDB'
+          author: 'SQL Kite'
         };
       });
     } catch (error) {

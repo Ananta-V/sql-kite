@@ -542,7 +542,7 @@ function MigrationRow({
                 Checksum: {migration.checksum ? `sha256:${migration.checksum.substring(0, 12)}...` : 'N/A'}
               </div>
               <div>
-                Author: {migration.author || 'LocalDB'}
+                Author: {migration.author || 'SQL Kite'}
               </div>
             </div>
           </div>

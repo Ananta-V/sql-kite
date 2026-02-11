@@ -128,7 +128,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   // Query tabs state
   const [queryTabs, setQueryTabs] = useState<QueryTab[]>(() => {
     if (typeof window === 'undefined') return [{ id: 'tab-1', name: 'Untitled query', sql: '-- Write your SQL query here\n' }]
-    const saved = localStorage.getItem('localdb-query-tabs')
+    const saved = localStorage.getItem('sql-kite-query-tabs')
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
@@ -139,7 +139,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   })
   const [activeQueryTabId, setActiveQueryTabId] = useState<string>(() => {
     if (typeof window === 'undefined') return 'tab-1'
-    const saved = localStorage.getItem('localdb-active-query-tab')
+    const saved = localStorage.getItem('sql-kite-active-query-tab')
     return saved || 'tab-1'
   })
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
@@ -150,7 +150,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   // Private items state
   const [privateItems, setPrivateItems] = useState<Array<{ id: string; label: string; sql?: string; type: 'file' | 'folder'; expanded?: boolean; children?: any[] }>>(() => {
     if (typeof window === 'undefined') return []
-    const saved = localStorage.getItem('localdb-private')
+    const saved = localStorage.getItem('sql-kite-private')
     if (saved) {
       try {
         return JSON.parse(saved)
@@ -161,7 +161,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
 
   // Persist private items to localStorage
   useEffect(() => {
-    localStorage.setItem('localdb-private', JSON.stringify(privateItems))
+    localStorage.setItem('sql-kite-private', JSON.stringify(privateItems))
   }, [privateItems])
 
   // Save modal state
@@ -172,11 +172,11 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
 
   // Persist tabs to localStorage
   useEffect(() => {
-    localStorage.setItem('localdb-query-tabs', JSON.stringify(queryTabs))
+    localStorage.setItem('sql-kite-query-tabs', JSON.stringify(queryTabs))
   }, [queryTabs])
 
   useEffect(() => {
-    localStorage.setItem('localdb-active-query-tab', activeQueryTabId)
+    localStorage.setItem('sql-kite-active-query-tab', activeQueryTabId)
   }, [activeQueryTabId])
 
   // Ctrl+S to open save dropdown
@@ -236,11 +236,11 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
   const getCurrentSectionItems = useCallback((type: 'favorite' | 'template' | 'private'): any[] => {
     if (type === 'private') return privateItems
     if (type === 'favorite') {
-      const saved = localStorage.getItem('localdb-favorites')
+      const saved = localStorage.getItem('sql-kite-favorites')
       return saved ? JSON.parse(saved) : []
     }
     if (type === 'template') {
-      const saved = localStorage.getItem('localdb-templates')
+      const saved = localStorage.getItem('sql-kite-templates')
       return saved ? JSON.parse(saved) : []
     }
     return []
@@ -276,16 +276,16 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
     const newItem = { id: `${type.slice(0, 4)}-${Date.now()}`, label: name, sql: saveModal.sql, type: 'file' as const }
 
     if (type === 'favorite') {
-      const saved = localStorage.getItem('localdb-favorites')
+      const saved = localStorage.getItem('sql-kite-favorites')
       const favorites = saved ? JSON.parse(saved) : []
       const updated = addItemToPath(favorites, newItem, selectedFolderPath)
-      localStorage.setItem('localdb-favorites', JSON.stringify(updated))
+      localStorage.setItem('sql-kite-favorites', JSON.stringify(updated))
       window.dispatchEvent(new Event('storage'))
     } else if (type === 'template') {
-      const saved = localStorage.getItem('localdb-templates')
+      const saved = localStorage.getItem('sql-kite-templates')
       const templates = saved ? JSON.parse(saved) : []
       const updated = addItemToPath(templates, newItem, selectedFolderPath)
-      localStorage.setItem('localdb-templates', JSON.stringify(updated))
+      localStorage.setItem('sql-kite-templates', JSON.stringify(updated))
       window.dispatchEvent(new Event('storage'))
     } else if (type === 'private') {
       setPrivateItems(prev => addItemToPath(prev, newItem, selectedFolderPath))
@@ -1212,7 +1212,7 @@ export default function SQLEditorPage({ compareMode = false, onCompareModeChange
 
   function exportAsSQL(): string {
     const timestamp = new Date().toISOString()
-    return `-- Exported from LocalDB\n-- Date: ${timestamp}\n-- Query Type: ${lastQueryType}\n\n${lastExecutedSQL}`
+    return `-- Exported from SQL Kite\n-- Date: ${timestamp}\n-- Query Type: ${lastQueryType}\n\n${lastExecutedSQL}`
   }
 
   function downloadFile(content: string, filename: string, mimeType: string) {

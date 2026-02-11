@@ -1,5 +1,5 @@
 {
-  "name": "@localdb/studio",
+  "name": "@sql-kite/studio",
   "version": "1.0.0",
   "private": true,
   "scripts": {

@@ -112,7 +112,7 @@ export default function TimelinePage() {
           <div className="h-full flex flex-col items-center justify-center text-app-text-dim">
             <Clock className="w-12 h-12 mb-3 opacity-50" />
             <p className="text-lg">No events yet</p>
-            <p className="text-sm mt-1">Activity will appear here as you use LocalDB</p>
+            <p className="text-sm mt-1">Activity will appear here as you use SQL Kite</p>
           </div>
         ) : (
           <div className="max-w-4xl mx-auto space-y-6">

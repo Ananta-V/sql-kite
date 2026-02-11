@@ -1,5 +1,5 @@
 {
-  "name": "@localdb/server",
+  "name": "@sql-kite/server",
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.js",

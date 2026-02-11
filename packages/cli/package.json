@@ -1,12 +1,12 @@
 {
-  "name": "@localdb/cli",
+  "name": "@sql-kite/cli",
   "version": "1.0.0",
   "type": "module",
   "bin": {
-    "localdb": "./bin/localdb.js"
+    "sql-kite": "./bin/sql-kite.js"
   },
   "scripts": {
-    "dev": "node bin/localdb.js"
+    "dev": "node bin/sql-kite.js"
   },
   "dependencies": {
     "commander": "^12.0.0",

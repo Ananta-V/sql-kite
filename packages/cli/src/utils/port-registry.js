@@ -7,7 +7,7 @@ const REGISTRY_FILE = join(RUNTIME_DIR, '.port-registry.json');
 const LOCK_TIMEOUT = 5000; // 5 seconds
 
 /**
- * Port Registry - Manages port allocation across all LocalDB projects
+ * Port Registry - Manages port allocation across all SQL Kite projects
  *
  * Features:
  * - Centralized port tracking

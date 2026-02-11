@@ -11,10 +11,11 @@ import SnapshotsPage from '@/components/SnapshotsPage'
 import MigrationsPage from '@/components/MigrationsPage'
 import BranchesPage from '@/components/BranchesPage'
 import BranchCreateModal from '@/components/BranchCreateModal'
+import ExportPage from '@/components/ExportPage'
 import { AppProvider, useAppContext } from '@/contexts/AppContext'
 import { getProjectInfo } from '@/lib/api'
 
-type Page = 'home' | 'sql' | 'database' | 'branches' | 'migrations' | 'snapshots' | 'timeline' | 'settings'
+type Page = 'home' | 'sql' | 'database' | 'branches' | 'migrations' | 'snapshots' | 'timeline' | 'export' | 'settings'
 
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('home')
@@ -88,6 +89,7 @@ function AppContent() {
           {currentPage === 'migrations' && <MigrationsPage />}
           {currentPage === 'timeline' && <TimelinePage />}
           {currentPage === 'snapshots' && <SnapshotsPage />}
+          {currentPage === 'export' && <ExportPage />}
           {currentPage === 'settings' && (
             <div className="p-8">
               <h1 className="text-2xl font-bold">Settings</h1>

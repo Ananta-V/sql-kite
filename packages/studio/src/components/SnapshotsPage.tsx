@@ -5,6 +5,7 @@ import { Camera, Plus, RotateCcw, Trash2, ChevronDown, ChevronRight, Clock, Data
 import { getSnapshots, restoreSnapshot, deleteSnapshot } from '@/lib/api'
 import { formatDistanceToNow, format } from 'date-fns'
 import { useAppContext } from '@/contexts/AppContext'
+import { toast } from 'react-toastify'
 import SnapshotCreateModal from './SnapshotCreateModal'
 
 interface Snapshot {
@@ -42,7 +43,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function SnapshotsPage() {
-  const { branchVersion } = useAppContext()
+  const { branchVersion, incrementBranchVersion } = useAppContext()
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -67,17 +68,19 @@ export default function SnapshotsPage() {
   }
 
   async function handleRestore(snapshot: Snapshot) {
-    if (!confirm(`Restore from "${snapshot.name}"?\n\nThis will replace your current database with this snapshot and restart the server.`)) {
+    if (!confirm(`Restore from "${snapshot.name}"?\n\nThis will replace your current database with this snapshot.`)) {
       return
     }
 
     setRestoring(snapshot.id)
     try {
       await restoreSnapshot(snapshot.id)
-      alert('Snapshot restored! The page will reload.')
-      window.location.reload()
+      toast.success('Snapshot restored successfully')
+      // Refresh snapshots and branch state
+      await loadSnapshots()
+      incrementBranchVersion()
     } catch (error: any) {
-      alert('Failed to restore snapshot: ' + error.message)
+      toast.error('Failed to restore snapshot: ' + error.message)
     } finally {
       setRestoring(null)
     }
@@ -95,8 +98,9 @@ export default function SnapshotsPage() {
       if (expandedId === snapshot.id) {
         setExpandedId(null)
       }
+      toast.success('Snapshot deleted')
     } catch (error: any) {
-      alert('Failed to delete snapshot: ' + error.message)
+      toast.error('Failed to delete snapshot: ' + error.message)
     } finally {
       setDeleting(null)
     }

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Play, FileText, Check, X, Loader, ChevronRight, ChevronDown, AlertTriangle, Trash2, Download } from 'lucide-react'
 import { getMigrations, applyMigration, applyAllMigrations, getProjectInfo, getMigrationStatus, deleteMigration, exportAppliedMigrations, exportSchema } from '@/lib/api'
 import { useAppContext } from '@/contexts/AppContext'
+import { toast } from 'react-toastify'
 
 interface Migration {
   filename: string
@@ -21,7 +22,7 @@ interface Migration {
 }
 
 export default function MigrationsPage() {
-  const { branchVersion } = useAppContext()
+  const { branchVersion, incrementBranchVersion } = useAppContext()
   const [migrations, setMigrations] = useState<Migration[]>([])
   const [loading, setLoading] = useState(true)
   const [applying, setApplying] = useState<string | null>(null)
@@ -103,8 +104,11 @@ export default function MigrationsPage() {
       setError(null)
       await applyMigration(filename)
       await loadMigrations()
+      incrementBranchVersion()
+      toast.success(`Migration applied: ${filename}`)
     } catch (err: any) {
       setError(err.message)
+      toast.error('Failed to apply migration: ' + err.message)
     } finally {
       setApplying(null)
     }
@@ -126,8 +130,10 @@ export default function MigrationsPage() {
       setError(null)
       await deleteMigration(filename)
       await loadMigrations()
+      toast.success('Migration deleted')
     } catch (err: any) {
       setError(err.message)
+      toast.error('Failed to delete migration: ' + err.message)
     } finally {
       setDeleting(null)
     }
@@ -139,8 +145,11 @@ export default function MigrationsPage() {
       setError(null)
       await applyAllMigrations()
       await loadMigrations()
+      incrementBranchVersion()
+      toast.success('All migrations applied')
     } catch (err: any) {
       setError(err.message)
+      toast.error('Failed to apply migrations: ' + err.message)
     } finally {
       setApplying(null)
     }

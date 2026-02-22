@@ -427,6 +427,25 @@ All data lives inside:
 
 ## Development
 
+After cloning the repository, install dependencies in these 3 locations:
+
+```bash
+# 1. Root directory
+npm install
+
+# 2. CLI package
+cd packages/cli
+npm install
+
+# 3. Studio package
+cd ../studio
+npm install
+
+#4 Server package
+cd ../server
+npm install
+```
+
 Run services individually:
 
 ```bash

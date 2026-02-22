@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 import { createRequire } from 'module';
 
@@ -18,11 +18,28 @@ import importRoutes from './routes/import.js';
 import compareRoutes from './routes/compare.js';
 import exportRoutes from './routes/export.js';
 
-// Import meta migration
-import { migrateMetaDb } from '../../cli/src/utils/meta-migration.js';
-
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Import meta migration - works in both layouts:
+//   monorepo: packages/server/src/ -> ../../cli/src/utils/meta-migration.js
+//   npm:      sql-kite/server/     -> ../src/utils/meta-migration.js
+let migrateMetaDb;
+const metaMigrationPaths = [
+  join(__dirname, '..', 'src', 'utils', 'meta-migration.js'),       // npm layout
+  join(__dirname, '..', '..', 'cli', 'src', 'utils', 'meta-migration.js')  // monorepo
+];
+for (const p of metaMigrationPaths) {
+  if (existsSync(p)) {
+    const mod = await import(pathToFileURL(p).href);
+    migrateMetaDb = mod.migrateMetaDb;
+    break;
+  }
+}
+if (!migrateMetaDb) {
+  console.error('Could not find meta-migration.js. Tried:', metaMigrationPaths);
+  process.exit(1);
+}
 
 const PROJECT_NAME = process.env.PROJECT_NAME;
 const PROJECT_PATH = process.env.PROJECT_PATH;
@@ -125,8 +142,13 @@ if (!IMPORT_MODE) {
   });
 }
 
-// Serve Studio static files
-const studioPath = join(__dirname, '../../studio/out');
+// Serve Studio static files - works in both layouts:
+//   monorepo: packages/server/src/ -> ../../studio/out
+//   npm:      sql-kite/server/     -> ../studio-out
+let studioPath = join(__dirname, '..', 'studio-out');  // npm layout
+if (!existsSync(studioPath)) {
+  studioPath = join(__dirname, '..', '..', 'studio', 'out');  // monorepo layout
+}
 
 console.log('Looking for Studio at:', studioPath);
 console.log('Studio exists:', existsSync(studioPath));

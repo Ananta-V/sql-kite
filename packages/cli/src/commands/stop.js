@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { getProjectServerInfoPath, projectExists } from '../utils/paths.js';
 import { releasePort } from '../utils/port-finder.js';
+import { execSync } from 'child_process';
 
 export async function stopCommand(name) {
   if (!projectExists(name)) {
@@ -22,7 +23,7 @@ export async function stopCommand(name) {
   try {
     const serverInfo = JSON.parse(readFileSync(serverInfoPath, 'utf-8'));
 
-    // Send SIGTERM signal
+    // Try graceful shutdown first
     try {
       process.kill(serverInfo.pid, 'SIGTERM');
     } catch (killError) {
@@ -49,7 +50,11 @@ export async function stopCommand(name) {
     if (!processTerminated) {
       // Force kill if graceful shutdown timed out
       try {
-        process.kill(serverInfo.pid, 'SIGKILL');
+        if (process.platform === 'win32') {
+          execSync(`taskkill /PID ${serverInfo.pid} /F /T`, { stdio: 'ignore' });
+        } else {
+          process.kill(serverInfo.pid, 'SIGKILL');
+        }
         await new Promise(resolve => setTimeout(resolve, 500));
       } catch (e) {
         // Process might already be gone

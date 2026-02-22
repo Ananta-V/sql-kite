@@ -1,16 +1,35 @@
 import { existsSync, mkdirSync, copyFileSync, readFileSync, unlinkSync, writeFileSync, statSync } from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { spawn } from 'child_process'
-import { dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
+import { homedir } from 'os'
 import Database from 'better-sqlite3'
-import { findFreePort } from '../../../cli/src/utils/port-finder.js'
-import { migrateMetaDb } from '../../../cli/src/utils/meta-migration.js'
-import { validateProjectName } from '../../../cli/src/utils/paths.js'
+
+const __routes_dirname = dirname(fileURLToPath(import.meta.url))
+
+// Resolve CLI utils - works in both layouts:
+//   monorepo: packages/server/src/routes/ -> ../../../cli/src/utils/
+//   npm:      sql-kite/server/routes/     -> ../../src/utils/
+const cliUtilsCandidates = [
+  join(__routes_dirname, '..', '..', 'src', 'utils'),                // npm layout
+  join(__routes_dirname, '..', '..', '..', 'cli', 'src', 'utils')   // monorepo layout
+]
+let cliUtilsDir
+for (const candidate of cliUtilsCandidates) {
+  if (existsSync(join(candidate, 'paths.js'))) {
+    cliUtilsDir = candidate
+    break
+  }
+}
+if (!cliUtilsDir) {
+  throw new Error('Could not find CLI utils directory. Tried: ' + cliUtilsCandidates.join(', '))
+}
+const { findFreePort } = await import(pathToFileURL(join(cliUtilsDir, 'port-finder.js')).href)
+const { migrateMetaDb } = await import(pathToFileURL(join(cliUtilsDir, 'meta-migration.js')).href)
+const { validateProjectName } = await import(pathToFileURL(join(cliUtilsDir, 'paths.js')).href)
 
 export default async function importRoutes(fastify, options) {
-  const __dirname = dirname(fileURLToPath(import.meta.url))
-  const homeDir = process.env.HOME || process.env.USERPROFILE
+  const homeDir = homedir()
   const projectsRoot = join(homeDir, '.sql-kite', 'runtime')
   const sessionFile = join(homeDir, '.sql-kite', 'import-pending.json')
 
@@ -230,7 +249,14 @@ export default async function importRoutes(fastify, options) {
       
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
       const snapshotFilename = `imported-baseline-${timestamp}.db`
-      const snapshotPath = join(projectPath, 'snapshots', snapshotFilename)
+      const snapshotDir = join(projectPath, '.studio', 'snapshots')
+      
+      // Ensure snapshots directory exists
+      if (!existsSync(snapshotDir)) {
+        mkdirSync(snapshotDir, { recursive: true })
+      }
+      
+      const snapshotPath = join(snapshotDir, snapshotFilename)
 
       // Copy database to snapshot
       let sourceDb
@@ -320,7 +346,7 @@ export default async function importRoutes(fastify, options) {
       }
 
       const port = await findFreePort(3000, safeName)
-      const serverPath = join(__dirname, '..', 'index.js')
+      const serverPath = join(__routes_dirname, '..', 'index.js')
       const serverProcess = spawn('node', [serverPath], {
         detached: true,
         stdio: 'ignore',

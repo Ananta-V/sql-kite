@@ -1,11 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from 'child_process'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
 import chalk from 'chalk'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { getServerEntryPath } from '../utils/paths.js'
 
 export default function importServerCommand(port = 3000) {
   console.log(chalk.cyan('→ Starting import server...'))
@@ -13,7 +10,7 @@ export default function importServerCommand(port = 3000) {
   console.log(chalk.dim('  Mode: Import-only'))
   console.log('')
 
-  const serverPath = join(__dirname, '../../../server/src/index.js')
+  const serverPath = getServerEntryPath()
 
   const serverProcess = spawn('node', [serverPath], {
     stdio: 'inherit',

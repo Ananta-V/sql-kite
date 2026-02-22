@@ -1,11 +1,71 @@
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { fileURLToPath } from 'url';
 
 export const SQL_KITE_HOME = join(homedir(), '.sql-kite');
 export const RUNTIME_DIR = join(SQL_KITE_HOME, 'runtime');
 export const STUDIO_DIR = join(SQL_KITE_HOME, 'studio');
 export const LOGS_DIR = join(SQL_KITE_HOME, 'logs');
+
+/**
+ * Resolve paths that work in both layouts:
+ * 
+ * Development (monorepo):
+ *   packages/cli/src/utils/paths.js  (this file)
+ *   packages/server/src/index.js
+ *   packages/studio/out/
+ * 
+ * Published (npm install -g):
+ *   node_modules/sql-kite/src/utils/paths.js  (this file)
+ *   node_modules/sql-kite/server/index.js
+ *   node_modules/sql-kite/studio-out/
+ */
+const __paths_dirname = dirname(fileURLToPath(import.meta.url));
+// CLI package root: src/utils -> src -> cli root
+const CLI_PACKAGE_ROOT = join(__paths_dirname, '..', '..');
+
+/**
+ * Get the path to the Studio static build output.
+ * Checks npm-published layout first, then monorepo layout.
+ */
+export function getStudioOutPath() {
+  // npm layout: <pkg>/studio-out/
+  const npmPath = join(CLI_PACKAGE_ROOT, 'studio-out');
+  if (existsSync(npmPath)) return npmPath;
+
+  // monorepo layout: packages/cli/../../studio/out
+  const monoPath = join(CLI_PACKAGE_ROOT, '..', 'studio', 'out');
+  if (existsSync(monoPath)) return monoPath;
+
+  // Return npm path as default (will trigger "not built" error with correct message)
+  return npmPath;
+}
+
+/**
+ * Get the path to the server entry point.
+ * Checks npm-published layout first, then monorepo layout.
+ */
+export function getServerEntryPath() {
+  // npm layout: <pkg>/server/index.js
+  const npmPath = join(CLI_PACKAGE_ROOT, 'server', 'index.js');
+  if (existsSync(npmPath)) return npmPath;
+
+  // monorepo layout: packages/cli/../../server/src/index.js
+  const monoPath = join(CLI_PACKAGE_ROOT, '..', 'server', 'src', 'index.js');
+  if (existsSync(monoPath)) return monoPath;
+
+  // Return npm path as default
+  return npmPath;
+}
+
+/**
+ * Get the path to the CLI utils directory.
+ * Used by the server to import shared utilities.
+ */
+export function getCliUtilsDir() {
+  return __paths_dirname;
+}
 
 export function getProjectPath(name) {
   return join(RUNTIME_DIR, name);

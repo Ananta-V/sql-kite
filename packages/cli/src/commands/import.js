@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 
 import { existsSync, statSync, accessSync, constants, writeFileSync, mkdirSync } from 'fs'
-import { resolve, extname, basename, join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { resolve, extname, basename, join } from 'path'
 import Database from 'better-sqlite3'
 import chalk from 'chalk'
 import { spawn } from 'child_process'
 import http from 'http'
 import open from 'open'
 import { findFreePort } from '../utils/port-finder.js'
-import { ensureSqlKiteDirs, LOGS_DIR } from '../utils/paths.js'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { ensureSqlKiteDirs, LOGS_DIR, SQL_KITE_HOME, getStudioOutPath, getServerEntryPath } from '../utils/paths.js'
 
 export default async function importCommand(dbPath) {
   ensureSqlKiteDirs()
@@ -136,8 +133,7 @@ export default async function importCommand(dbPath) {
   console.log('')
 
   // Store import session data
-  const homeDir = process.env.HOME || process.env.USERPROFILE
-  const sqlKiteDir = join(homeDir, '.sql-kite')
+  const sqlKiteDir = SQL_KITE_HOME
   const sessionFile = join(sqlKiteDir, 'import-pending.json')
 
   // Ensure .sql-kite directory exists
@@ -223,7 +219,7 @@ export default async function importCommand(dbPath) {
   console.log('')
   console.log(chalk.dim(`Session saved to: ${sessionFile}`))
 
-  const studioPath = join(__dirname, '../../../studio/out')
+  const studioPath = getStudioOutPath()
   if (!existsSync(studioPath)) {
     console.log(chalk.red(`\n✗ Studio UI not built yet`))
     console.log(chalk.dim(`   Run: ${chalk.cyan(`cd packages/studio && npm run build`)}`))
@@ -234,7 +230,7 @@ export default async function importCommand(dbPath) {
     const { port, alreadyRunning } = await getImportServerPort()
 
     if (!alreadyRunning) {
-      const serverPath = join(__dirname, '../../../server/src/index.js')
+      const serverPath = getServerEntryPath()
       const logPath = join(LOGS_DIR, `import-server-${Date.now()}.log`)
       const out = []
       const serverProcess = spawn('node', [serverPath], {

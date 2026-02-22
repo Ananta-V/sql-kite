@@ -1,6 +1,6 @@
 {
   "name": "sql-kite",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "SQL-Kite CLI — Local-first SQLite workspace with branches, migrations and snapshots.",
   "type": "module",
   "preferGlobal": true,
